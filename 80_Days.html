@@ -2,7 +2,7 @@
 <!DOCTYPE html>
 <html>
   <head>
-   <title>Eighty Days - QBASIC Game</title>
+   <title>80 Days - A game for the Basic Anywhere Machine</title>
       <script>
 // Copyright 2022 CJ Veniot
 // Derivative of wwwbasic.js (https://github.com/google/wwwbasic/blob/master/wwwbasic.js)
@@ -4944,10 +4944,9 @@ PRINT
 INPUT "HIT ENTER TO BEGIN"
 
 DIM A(7),P(9),T(9),Z(9)
-DIM N$(1)
+H$ = CHR$(156)
 M = 120
 E = INT(RND*9)+1
-N$(1)="S"
 
 REM SET TICKET PRICES
 FOR X=1 TO 4
@@ -4973,14 +4972,15 @@ A(5) = 9
 NEWDAY:
 
 IF M<0 THEN
-  PRINT "INSUFFICENT FUNDS. LOSE "+(-M)+" DAY"+N$(-(M>0))
+  PRINT "INSUFFICENT FUNDS. LOSE "+(-M)+" DAY"
+  IF M<1 THEN PRINT "S";
   PRINT "DOING ODD JOBS."
   D = D-M
   M = 0
 END IF
 
 PRINT
-PRINT "DAY "+D+" - "+C$+" - $"+M
+PRINT "DAY "+D+" - "+C$+" - "; H$; M
 GOSUB TICKETS
 
 REM END GAME
@@ -5001,26 +5001,26 @@ PROMPT:
 PRINT
 PRINT "WHAT DO YOU WANT TO DO?"
 IF A(1) THEN
-  PRINT "B) BRIBE AGENT (+$2) FOR ";
-  PRINT A(1)+" ($"+P(A(1))+")"
+  PRINT "B) BRIBE AGENT (+"; H$; "2) FOR ";
+  PRINT A(1)+" ("; H$; P(A(1))+")"
 END IF
 REM A(2)
 PRINT "E) EMBARK FOR "+D$+" ("+LEFT$(R$,INSTR(R$+",",",")-1)+")"
 IF A(3) THEN
   PRINT "P) PURCHASE "; A(3); "-DAY ";
   IF A(3)<5 THEN PRINT "RAIL"; ELSE PRINT "STEAMER";
-  PRINT " TICKET ($"; P(A(3)); ")"
+  PRINT " TICKET ("; H$; P(A(3)); ")"
 END IF
 REM A(4)
-PRINT "R) RESERVE 4-DAY RAIL TICKET ($1)"
+PRINT "R) RESERVE 4-DAY RAIL TICKET ("; H$; "1)"
 REM A(5)
-PRINT "S) SECURE STEERAGE TICKET (9 DAYS) ($5)"
+PRINT "S) SECURE STEERAGE TICKET (9 DAYS) ("; H$; "5)"
 IF A(6) THEN
-  PRINT "T) TAKE FIRST AVAILABLE (+$1)"
+  PRINT "T) TAKE FIRST AVAILABLE (+"; H$; "1)"
 END IF
 IF A(7) THEN
   PRINT "W) WAIT DAY FOR ";
-  PRINT A(7)+" ($"+P(A(7))+")"
+  PRINT A(7)+" ("; H$; P(A(7))+")"
 END IF
 DO
   INPUT "? "; A$ 
@@ -5032,7 +5032,7 @@ REM GET TICKETS
 IF X<>2 THEN
   IF X=1 THEN M=M-2
   IF X=6 THEN
-    PRINT "TAKE "+ A(X)+" FOR $"+(P(A(X))+1)
+    PRINT "TAKE "+ A(X)+" FOR "+H$+(P(A(X))+1)
     M=M-1
   END IF
   IF X=7 THEN D=D+1
@@ -5147,7 +5147,8 @@ IF I=E THEN
     G=1
   REM TO CALCUTTA
   ELSEIF I=4 THEN 
-    INPUT "RAILWAY NOT COMPLETE! HIRE AN ELEPHANT FOR $8? ";A$
+    PRINT "RAILWAY NOT COMPLETE! HIRE AN ELEPHANT FOR "; H$;
+    INPUT "8? ";A$
     IF LEFT$(A$,1)="Y" THEN
       M = M-8
     ELSE
@@ -5156,7 +5157,7 @@ IF I=E THEN
     END IF
   REM TO HONG KONG
   ELSEIF I=5 THEN
-    PRINT "ARRESTED BY SCOTLAND YARD. POST BAIL FOR $5 OR WAIT 3 DAYS"
+    PRINT "ARRESTED BY SCOTLAND YARD. POST BAIL FOR "; H$; "5 OR WAIT 3 DAYS"
     INPUT "FOR HEARING? ";A$
     IF LEFT$(A$,1)="W" THEN
       L = L+3
@@ -5187,7 +5188,8 @@ IF I=E THEN
       L=L+3
       G=1
     ELSE
-      INPUT "BRIBE STEAMER ENGINEER $2 TO HURRY OR WAIT A DAY?";A$
+      PRINT "BRIBE STEAMER ENGINEER "; H$; "2 ";
+      INPUT "TO HURRY OR WAIT A DAY?";A$
       IF LEFT$(A$,1)="W" THEN
         L = L+1
       ELSE
@@ -5202,7 +5204,7 @@ IF I=E THEN
         L=L+1
         G=1
       ELSEIF RND<=0.5 THEN
-        PRINT "SUSPENSION BRIDGE OUT. PAY $1 FOR HOT-AIR BALLOON RIDE"
+        PRINT "SUSPENSION BRIDGE OUT. PAY "; H$; "1 FOR HOT-AIR BALLOON RIDE"
         INPUT "OR WAIT 2 DAYS? ";A$
         IF LEFT$(A$,1)="W" THEN
           L = L+2
@@ -5228,7 +5230,8 @@ IF I=E THEN
       	G=1
       ELSE
         PRINT "CAPTAIN WANTS TO DELAY 2 DAYS FOR HURRICANE."
-        INPUT "BRIBE HIM $3 OR WAIT? ";A$
+        PRINT "BRIBE HIM "; H$; "3 OR WAIT? ";
+        INPUT A$
         IF LEFT$(A$,1)="W" THEN
           L = L+2
         ELSE
@@ -5236,7 +5239,7 @@ IF I=E THEN
         END IF
       END IF
     ELSE
-      PRINT "PAY $5 FOR STEAMER REPAIRS AT BERMUDA."
+      PRINT "PAY "; H$; "5 FOR STEAMER REPAIRS AT BERMUDA."
       G=1
       M=M-5
     END IF
@@ -5260,7 +5263,7 @@ IF I=1 THEN D$="SUEZ"
 IF I=2 THEN D$="BOMBAY"
 IF I=3 THEN D$="CALCUTTA"
 IF I=4 THEN D$="HONG KONG"
-IF I=5 THEN D$="YOKOHOMA"
+IF I=5 THEN D$="YOKOHAMA"
 IF I=6 THEN D$="SAN FRANCISCO"
 IF I=7 THEN D$="NEW YORK"
 IF I=8 THEN D$="LONDON"
