@@ -1,0 +1,6133 @@
+
+<!DOCTYPE html>
+<html>
+  <head>
+   <title>Railroad Spike in BASIC Anywhere Machine</title>
+      <script>
+// Copyright 2022 CJ Veniot
+// Derivative of wwwbasic.js (https://github.com/google/wwwbasic/blob/master/wwwbasic.js)
+// subject to the same license as the source last committed on Github Dec 27, 2018
+//
+// Copyright 2018 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+'use strict';
+
+var keyState = {};
+var keyPressed = 0;
+const gmap = new Map();
+var page0; var page1; var page2;
+var constants_list='';
+var NoEekOnSkip=0;
+var SleepUntilKey=0;
+var openwindow;
+var autodisplay=1;
+var display_now=0;
+var loop_count= 0;
+var spool_name='';
+var spool_text='';
+var hiddenElement = document.createElement('a');
+//var acontext = new (window.AudioContext || window.webkitAudioContext)();
+var globalAudioContext;
+var sndwave = "sine";
+var sndfade = "exponential";
+var audio_queue = [];
+var audio_queue_timer = 0;
+// https://stackoverflow.com/questions/69516768/web-audio-api-sound-interaction-stops-working-after-a-while
+class Audio
+{
+    constructor()
+    {
+        // instantiate web audio api object 
+        // create gain node, gain corresponds with volume
+        this.gainNode = globalAudioContext.createGain();
+        //this.gainNode.gain.setValueAtTime(0.8, 0);
+        // allows volume to decrease with time
+        // this.gainNode.gain.exponentialRampToValueAtTime(0.001, globalAudioContext.currentTime  );
+    }
+    createNotes(f,d)
+    {
+            let oscillator = globalAudioContext.createOscillator();
+            oscillator.type=sndwave;
+            this.gainNode.gain.setValueAtTime(64/(Math.log(f)**2), globalAudioContext.currentTime);
+            oscillator.frequency.setValueAtTime(f, globalAudioContext.currentTime );
+            if (sndfade=='no')
+              {this.gainNode.gain.setValueAtTime(0.001, globalAudioContext.currentTime + d/18.2  );}
+            else if (sndfade=='linear')
+              {this.gainNode.gain.linearRampToValueAtTime(0.001, globalAudioContext.currentTime + d/18.2  );}
+            else
+              {this.gainNode.gain.exponentialRampToValueAtTime(0.001, globalAudioContext.currentTime + d/18.2  );}
+            oscillator.connect(this.gainNode);
+            this.gainNode.connect(globalAudioContext.destination);
+            oscillator.start(0);
+            oscillator.stop(globalAudioContext.currentTime + d/18.2 );
+    }
+}
+
+var g;
+var o;
+
+//var o;
+var curr_mode;
+var curr_width;
+var curr_height;
+var readme_modes = [
+[0, 640, 200, 16],
+[1, 320, 200, 4],
+[2, 640, 200, 2],
+[3, 640, 200, 16], [4, 0, 0, 0], [5, 0, 0, 0], [6, 0, 0, 0],
+[7, 320, 200, 16],
+[8, 640, 200, 16],
+[9, 640, 350, 16],
+[10, 640, 350, 16],
+[11, 640, 480, 2],
+[12, 640, 480, 16],
+[13, 320, 200, 256],
+[14, 320, 200, 256],
+[15, 320, 200, 256],
+[16, 320, 200, 256],
+[17, 320, 200, 256],
+[23, 320, 200, 0],
+[24, 320, 200, 0],
+[25, 320, 200, 0],
+[26, 320, 200, 0],
+[27, 320, 200, 0]
+];
+
+(function() {
+  var DYNAMIC_HEAP_SIZE = 1024 * 1024 * 16;
+  var STACK_SIZE = 64 * 1024;
+  var MAX_DIMENSIONS = 7;
+  var BLACK = 0xff000000;
+  var WHITE = 0xffffffff;
+
+  var SIMPLE_TYPE_INFO = {
+    'byte': {array: 'Uint8Array', size: 1, shift: 0, view: 'b'},
+    'short': {array: 'Int16Array', size: 2, shift: 1, view: 'i16'},
+    'long': {array: 'Int32Array', size: 4, shift: 2, view: 'i'},
+    'single': {array: 'Float32Array', size: 4, shift: 2, view: 's'},
+    'double': {array: 'Float64Array', size: 8, shift: 3, view: 'd'},
+    'string': {array: 'Array', size: 1, shift: 0, view: 'str'},
+  };
+
+  var IMPLICIT_TYPE_MAP = {
+    '$': 'string', '%b': 'byte', '%': 'short', '&': 'long', '!': 'single', '#': 'double',
+  };
+
+  function NextChar(ch) {
+    return String.fromCharCode(ch.charCodeAt(0) + 1);
+  }
+
+  function RenderFont(ctx, height) {
+    var data = new Uint8Array(256 * 8 * height);
+    var pos = 0;
+    for (var i = 0; i < 256; ++i) {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, 16, 32);
+      ctx.textBaseline = 'top';
+      ctx.font = 'bold 16px monospace';
+      ctx.save();
+      ctx.scale(1, height / 16);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(CHARSET.charAt(i), 0, 0);
+      ctx.restore();
+      var pix = ctx.getImageData(0, 0, 8, height);
+      var pdata = pix.data;
+      for (var j = 0; j < pdata.length; j += 4) {
+        var level = pdata[j] * 0.1140 +
+                    pdata[j + 1] * 0.5870 +
+                    pdata[j + 2] * 0.2989;
+        data[pos++] = level > 128 ? 255 : 0;
+      }
+    }
+    return data;
+  }
+
+  function LoadFont(s, dup) {
+    var data = new Uint8Array(s.length * dup);
+    var pos = 0;
+    for (var i = 0; i < 256; ++i) {
+      var row = Math.floor(i / 8);
+      var col = i % 8;
+      for (var y = 0; y < 8; ++y) {
+        for (var d = 0; d < dup; ++d) {
+          for (var x = 0; x < 8; ++x) {
+            data[pos++] = s[x + y * 8 * 8 + col * 8 + row * 64 * 8]
+              != ' ' ? 255 : 0;
+          }
+        }
+      }
+    }
+    return data;
+  }
+
+  function CreateFont(ctx, height) {
+    if (height == 8) {
+      return LoadFont(FONT8, 1);
+    } else if (height == 16) {
+      return LoadFont(FONT8, 2);
+    } else {
+      return RenderFont(ctx, height);
+    }
+  }
+
+  function Interpret(code, canvas, from_tag) {
+    // Display Info (in browser only).
+    var screen_mode = 0;
+    var screen_bpp = 4;
+    var text_width = 80;
+    var text_height = 60;
+    var font_height = 16;
+    var screen_aspect = 1;
+    var font_data;
+    var ctx;
+    var display;
+    var display_data;
+    var scale_canvas;
+
+    function SetupDisplay(width, height, aspect, fheight) {
+      if (!canvas) {
+        return;
+      }
+      ctx = canvas.getContext('2d', { alpha: false });
+      display = ctx.createImageData(width, height);
+      display_data = new Uint32Array(display.data.buffer);
+      if (!scale_canvas) {
+        scale_canvas = document.createElement('canvas');
+      }
+      scale_canvas.width = width;
+      scale_canvas.height = height;
+      text_width = Math.floor(width / 8);
+      text_height = Math.floor(height / fheight);
+      screen_aspect = aspect;
+      font_height = fheight;
+      var sctx = scale_canvas.getContext('2d', { alpha: false});
+      font_data = CreateFont(sctx, font_height);
+    }
+
+    Screen(0);
+
+    var debugging_mode = typeof debug == 'boolean' && debug;
+    // Parsing and Run State.
+    var labels = {};
+    var data_labels = {};
+    var flow = [];
+    var types = {};
+    var functions = {};
+    var global_vars = {};
+    var vars = global_vars;
+    var allocated = 0;
+    var const_count = 0;
+    var temp_count = 0;
+    var inside_type = false;
+    var inside_function = false;
+    var var_decls = '';
+    var data = [];
+    var data_pos = 0;
+    var ops = [];
+    var curop = '';
+    var ip = 0;
+    var function_define_pos = 0;
+    var function_old_allocated = 0;
+    var function_name = null;
+
+    // Call stack
+    var stack = 0;
+    var sp = 0;
+    var bp = 0;
+
+    // Input State
+    var keys = [];
+    var input_string = '';
+    var mouse_x = 0;
+    var mouse_y = 0;
+    var mouse_buttons = 0;
+    var mouse_wheel = 0;
+    var mouse_clip = 0;
+
+    // Language Options
+    var option_base = 0;
+    var option_explicit = false;
+
+    // Variable declaration defaults.
+    var letter_default = {};
+    // Default is single.
+    var i = 'a';
+    do {
+      letter_default[i] = 'single';
+      i = NextChar(i);
+    } while (i != 'z');
+
+    // Yield State
+    var yielding = 0;
+    var quitting = 0;
+    var delay = 0;
+
+    // Drawing and Console State
+    var color_map;
+    var reverse_color_map;
+    var fg_id;
+    var bg_id;
+    var fg_color = WHITE;
+    var bg_color = BLACK; // cjv: canvas background
+    var text_x = 0;
+    var text_y = 0;
+    var pen_x = 0;
+    var pen_y = 0;
+
+    const toklist = [
+      ':', ';', ',', '(', ')', '{', '}', '[', ']',
+      '+=', '-=', '*=', '/=', '\\=', '^=', '&=',
+      '+', '-', '*', '/', '\\', '^', '&', '.',
+      '<=', '>=', '<>', '=>', '=', '<', '>', '@', '\n',
+    ];
+    code = code.replace(/\r/g, ' ');
+    code = code.replace(/\t/g, ' ');
+    if (from_tag) {
+      code = code.replace(/&lt;/g, '<');
+      code = code.replace(/&gt;/g, '>');
+      code = code.replace(/&amp;/g, '&');
+    }
+
+    var tok = null;
+    var tok_count = 0;
+    var line = canvas ? 0 : 1;
+
+    function Next() {
+      tok = '';
+      tok_count++;
+      for (;;) {
+        while (code.substr(0, 1) == ' ' ||
+               code.substr(0, 1) == '\t') {
+          if (tok != '') {
+            return;
+          }
+          code = code.substr(1);
+        }
+        if (code.search(/^_[ \t]*('[^\n]*)?\n/) != -1) {
+          if (tok != '') {
+            return;
+          }
+          code = code.substr(code.search('\n') + 1);
+          ++line; // cjv
+          continue;
+        }
+        if (code.substr(0, 1) == '\'') {
+          if (tok != '') {
+            return;
+          }
+          while (code.length > 0 && code.substr(0, 1) != '\n') {
+            code = code.substr(1);
+          }
+          continue;
+        }
+        if (code.substr(0, 1) == '"') {
+          if (tok != '') {
+            return;
+          }
+          tok = '"';
+          code = code.substr(1);
+          while (code.length > 0 && code.substr(0, 1) != '"') {
+            if (code.substr(0, 1) == '\n') {
+              // Allow strings to cut off at end of line.
+              // GW-Basic seems to allow it.
+              tok += '"';
+              return;
+            }
+            tok += code.substr(0, 1);
+            code = code.substr(1);
+          }
+          tok += '"';
+          code = code.substr(1);
+          return;
+        }
+        if (tok == '' && /[.0-9][#]?/.test(code.substr(0, 1))) {
+          var n = code.match(/^([0-9]*([.][0-9]*)?([eE][+-]?[0-9]+)?[#]?)/);
+          if (n === null) {
+            Throw('Bad number');
+          }
+          tok = n[1];
+          code = code.substr(tok.length);
+          if (tok[tok.length - 1] == '#') {
+            tok = tok.substr(0, tok.length - 1);
+          }
+          return;
+        }
+        for (var i = 0; i < toklist.length; ++i) {
+          if (code.substr(0, toklist[i].length) == toklist[i]) {
+            if (tok != '') {
+              if (code.substr(0, 1) == '&' &&
+                code.substr(code.length - 1) != '$') {
+                tok += '&';
+                code = code.substr(1);
+              }
+              return;
+            }
+            tok = toklist[i];
+            code = code.substr(toklist[i].length);
+            if (tok == '\n') {
+              ++line;
+              tok = '<EOL>';
+            } else if (tok == '&' && code.substr(0, 1).toLowerCase() == 'h') {
+              code = code.substr(1);
+              var n = code.match(/^([0-9a-fA-F]+)/);
+              if (n === null) {
+                Throw('Bad hex number');
+              }
+              tok = '0x' + n[1];
+              code = code.substr(n[1].length);
+            } else if (tok == '&' && code.substr(0, 1).toLowerCase() == 'o') {
+              code = code.substr(1);
+              var n = code.match(/^([0-7]+)/);
+              if (n === null) {
+                Throw('Bad octal number');
+              }
+              tok = (+('0o' + n[1])).toString();
+              code = code.substr(n[1].length);
+            } else if (tok == '&' && code.substr(0, 1).toLowerCase() == 'b') {
+              code = code.substr(1);
+              var n = code.match(/^([0-1]+)/);
+              if (n === null) {
+                Throw('Bad binary number');
+              }
+              tok = '0b' + n[1];
+              code = code.substr(n[1].length);
+            }
+            return;
+          }
+        }
+        tok += code.substr(0, 1).toLowerCase();
+        code = code.substr(1);
+        if (code == '') {
+          return;
+        }
+      }
+    }
+    Next();
+
+    function ConsumeData() {
+      var quote = false;
+      var had_quote = false;
+      var item = '';
+      for (;;) {
+        var ch = code.substr(0, 1);
+        if (ch == '\n' || ch == '') {
+          if (!had_quote) {
+            if (!quote) {
+              item = item.trim();
+            }
+            data.push(item);
+          }
+          break;
+        }
+          else if (quote==false && item.trim()=='' && ch=='&') {item += '0';}
+          else if (quote==false && item.trim()=='0' && /^([hH])$/.test(ch) ) {item += 'x';}
+          else if (ch == '"') {
+          if (quote) {
+            data.push(item);
+            item = '';
+            quote = false;
+            had_quote = true;
+          } else {
+            quote = true;
+            if (item.search(/[^ \t]/) != -1) {
+              Throw('Data statement extra text: "' + item + '"');
+            }
+            item = '';
+          }
+        } else if (ch == ',') {
+          if (!quote) {
+            if (!had_quote) {
+              data.push(item.trim());
+            } else {
+              had_quote = false;
+              if (item.search(/[^ \t]/) != -1) {
+                Throw('Data statement extra text: "' + item + '"');
+              }
+            }
+            item = '';
+          } else {
+            item += ',';
+          }
+        } else {
+          item += ch;
+        }
+        code = code.substr(1);
+      }
+      Next();
+    }
+
+    function Throw(msg) {
+	   var tl=line-5;
+	   if (tok=="<EOF>"||tok=="<EOL>"||msg.includes("OUT OF DATA")) {tl-=1;}
+      alert('ERROR: line '+(tl+4925)+': '+msg);
+		throw 'line '+(tl+4925)+': '+msg;
+    }
+
+    function Skip(t,eek) {
+      if (tok!=t && NoEekOnSkip==0) {
+        Throw(eek+': Expected "'+t+'" found "'+tok+'"');
+      }
+      Next();
+    }
+
+    function EndOfStatement() {
+      return tok==':'||tok=='<EOL>';
+    }
+
+    function SkipEndOfStatement() {
+      if (!EndOfStatement()) {
+        Throw('Expected ":" (between statements) or "," (between parameters) or EOL');
+      }
+      Next();
+    }
+
+    function NewOp() {
+      ops.push(curop);
+      curop = '';
+    }
+
+    function If(e, n) {
+      if (n === undefined) {
+        n = [];
+      }
+      NewOp();
+      ops[ops.length - 1] += 'if (!(' + e + ')) { ip = ';
+      flow.push(['if', ops.length - 1, []]);
+    }
+
+    function Else() {
+      var f = flow.pop();
+      if (f[0] != 'if') {
+        Throw('ELSE unmatched to IF');
+      }
+      NewOp();
+      var pos = ops.length - 1;
+      ops[pos] += 'ip = ';
+      NewOp();
+      ops[f[1]] += ops.length + '; }\n';
+      flow.push(['else', null, f[2].concat(pos)]);
+    }
+
+    function ElseIf(e) {
+      var f = flow.pop();
+      if (f[0] != 'if') {
+        Throw('ELSEIF unmatched to IF');
+      }
+      NewOp();
+      var pos = ops.length - 1;
+      ops[pos] += 'ip = ';
+      NewOp();
+      ops[f[1]] += ops.length + '; }\n';
+      NewOp();
+      ops[ops.length - 1] += 'if (!(' + e + ')) { ip = ';
+      flow.push(['if', ops.length - 1, f[2].concat([pos])]);
+    }
+
+    function EndIf() {
+      NewOp();
+      var f = flow.pop();
+      if (f[0] == 'else') {
+        // nothing needed
+      } else if (f[0] == 'if') {
+        ops[f[1]] += ops.length + '; }\n';
+      } else {
+        Throw('Unmatch end if');
+      }
+      for (var i = 0; i < f[2].length; ++i) {
+        ops[f[2][i]] += ops.length + ';\n';
+      }
+    }
+
+    function VarPtr(vname) {
+      var vinfo;
+      if (vars[vname] !== undefined) {
+        vinfo = vars[vname];
+      } else if (global_vars[vname] !== undefined) {
+        vinfo = global_vars[vname];
+      }
+      if (vinfo === undefined) {
+        Throw('Undefined variable name');
+      }
+      if (vinfo.global) {
+        return vinfo.offset;
+      } else {
+        return '(bp + ' + vinfo.offset + ')';
+      }
+    }
+
+    function AddLabel(name) {
+      var n2 = name.replace(/^0+/, "");
+      if (labels[n2] !== undefined) {
+        Throw('Label ' + n2 + ' defined twice');
+      }
+      NewOp();
+      curop += '// LABEL ' + n2 + ':\n';
+      labels[n2] = ops.length;
+      data_labels[n2] = data.length;
+    }
+
+    function Factor3() {
+      var ts=''; var te='';
+      if (tok=='('||tok=='['||tok=='{') {
+        if (tok=='[') {ts='[';te=']';}
+        else if (tok=='{') {ts='{';te='}';}
+        else {ts='(';te=')';}
+        Skip(ts);
+        var ret = Expression();
+        Skip(te);
+        return ret;
+      } else {
+        var name = tok;
+        Next();
+        if (name.substr(0, 1) == '"' ||
+            /^[0-9]*([.][0-9]*)?([eE][+-]?[0-9]+)?$/.test(name) ||
+            /^0x[0-9a-fA-F]+$/.test(name) ||
+            /^0b[0-9a-fA-F]+$/.test(name)) {
+          return name;
+        }
+        if (name == 'rnd') {
+          if (tok == '(') {
+            Skip('(');
+            if (tok != ')') {
+              var e = Expression();
+            }
+            Skip(')');
+          }
+          return 'Math.random()';
+        }
+        if (name == '_pi') {
+		    var e = 1
+          if (tok == '(') {
+            Skip('(');
+            if (tok != ')') {
+              e = Expression();
+            }
+            Skip(')');
+          }
+          return 'Math.PI * ' + e;
+        }
+        if (name == 'varptr') {
+          Skip('(');
+          var vname = tok;
+          Next();
+          Skip(')');
+          return VarPtr(vname);
+        }
+        if (name == 'stackdepth') {
+          Skip('(');
+          Skip(')');
+          return 'sp';
+        }
+        if (name == 'basedepth') {
+          Skip('(');
+          Skip(')');
+          return 'bp';
+        }
+        if (name == 'true') {return '-1';}
+        if (name == 'false') {return '0';}
+		  if (name=='_fontheight') {return 'font_height';}
+		  if (name=='screen_aspect') {return 'screen_aspect';}
+		  if (name=='_width') {return 'curr_width';}
+		  if (name=='_height') {return 'curr_height';}
+		  if (name=='xmax') {return 'curr_width - 1';}
+		  if (name=='ymax') {return 'curr_height - 1';}
+		  if (name=='_windowwidth') {return 'GetWinWidth()';}
+		  if (name=='_windowheight') {return 'GetWinHeight()';}
+		  if (name=='_touchdevice') {return -+(('ontouchstart' in window) ||  
+    (navigator.maxTouchPoints > 0) ||  
+    (navigator.msMaxTouchPoints > 0));}
+        if (name=='csrlin') {return 'text_y + 1';}
+        if (name=='_mousex') {return 'mouse_x';}
+        if (name=='_mousey') {return 'mouse_y';}
+        if (name=='_mousebutton') {
+		    if (tok=='(') {Skip('('); var e=Expression(); Skip(')');}
+		    return 'mouse_buttons';}
+        if (name=='_mousewheel') {return 'MouseWheel()';}
+		    if (name=='_audiodone') {return 'AudioDone()';}
+        if (name=='urlquerystring$') {return 'decodeURIComponent(window.location.search.substring(1))';}
+        if (name=='now$') {return 'Date().toString()';}
+        if (name=='time$') {return 'Date().toString().split(" ")[4]';}
+        if (name=='day$') {var t=new Date(); var r=['SUN','MON','TUE','WED','THU','FRI','SAT'][t.getDay()]; return '"' + r + '"';}
+        if (name=='date$') {
+				  var today = new Date();
+          var dd = "0".concat(today.getDate().toString());
+					dd = dd.substr(dd.length-2, 2);
+          var mm = today.getMonth()+1; 
+					mm = "0".concat(mm.toString());
+					mm = mm.substr(mm.length-2, 2);
+          var yyyy = today.getFullYear();
+          return '"".concat("' + mm + '","-","' + dd + '","-","' + yyyy + '")';
+        }
+        if (name=='log'||name=='ucase$'||name=='lcase$'||
+            name=='chr$'||name=='_getchr$'||name=='sqr'||name=='hex$'||
+				    name=='oct$'||name=='_bin$'||name=='bin$'||
+            name=='int'||name=='cint'||name=='cdbl'||name=='csng'||name=='fix'||name=='frac'||
+				    name=='asc'||name=='fre'||name=='sgn'||
+            name=='abs'||name=='len'||name=='val'||
+            name=='cos'||name=='sin'||name=='tan'||name=='atn'||
+            name=='exp'||name=='_d2r'||name=='_r2d'||
+				    name=='str$'||name=='peek'||name=='_red'||name=='_green'||name=='_blue'||
+            name=='ltrim$'||name=='rtrim$'||name=='spc'||
+            name=='space$'||name=='tab'||name=='pos'||name=='_mapget'||
+				    name=='_confirm'||name=='getlocalstorageitem'||name=='getsessionstorageitem') {
+          Skip('(');
+          var e=Expression();
+          Skip(')');
+			 if (name=='_confirm') {curop+='Sleep(0.005);\n'; NewOp();}
+          switch (name) {
+          case 'log': return 'Math.log('+e+')';
+          case 'ucase$': return '('+e+').toUpperCase()'; case 'lcase$': return '('+e+').toLowerCase()';
+          case 'chr$': return 'String.fromCharCode('+e+')';
+          case '_getchr$': return 'GetChr('+e+')';
+          case 'asc': return '('+e+').charCodeAt(0)';
+			 case 'fre': return '("60300")';
+			 case 'sgn': return 'Math.sign('+e+')';
+          case 'sqr': return 'Math.sqrt('+e+')';
+          case 'hex$': return '(Math.round('+e+') >>> 0).toString(16)';
+          case 'oct$': return '(Math.round('+e+') >>> 0).toString(8)';
+          case 'bin$':
+          case '_bin$': return '(Math.round('+e+') >>> 0).toString(2)';
+          case 'int': return 'Math.floor('+e+')'; case 'cint': return 'Math.round('+e+')';
+          case 'cdbl': return 'Math.fround('+e+')'; case 'csng': return 'Math.fround('+e+')';
+          case 'fix': return 'Math.trunc('+e+')'; case 'abs': return 'Math.abs('+e+')';
+          case 'frac': return '("." + (' + e + ').toString().split(".")[1])*1';
+          case 'cos': return 'Math.cos('+e+')'; case 'sin': return 'Math.sin('+e+')';
+          case 'tan': return 'Math.tan('+e+')'; case 'atn': return 'Math.atan('+e+')';
+          case 'exp': return 'Math.exp('+e+')';
+          case '_d2r': return 'Number('+e+')*(Math.PI/180)'; case '_r2d': return 'Number('+e+')*(180/Math.PI)';
+          case 'str$': return 'ToString('+e+')';
+          case 'val': return '+('+e+')||0';
+          case 'peek': return 'Peek('+e+').toString()';
+			    case '_red': return '('+e+'>>16)';
+			    case '_green': return '('+e+'>>8)&0xFF';
+			    case '_blue': return '('+e+'&0xFF)';
+          case 'len': return '(('+e+').length)';
+          case 'ltrim$': return '(('+e+').trimStart())';
+          case 'rtrim$': return '(('+e+').trimEnd())';
+          case 'spc': return 'StringRep(('+e+'), " ")';
+          case 'space$': return 'StringRep(('+e+'), " ")';
+          case 'tab': return 'StringRep((text_x < '+e+' ? '+e+'-text_x-1 : Math.floor(curr_width/8)-text_x-('+e+'<0?0:1)+'+e+'), " ")';
+//        case 'tab': return 'StringRep(('+e+'), "\t")';
+          case 'pos': return '(text_x+1)';
+          case '_confirm': return '-+confirm(('+e+'))';
+          case '_mapget': return 'MapGet('+e+')';
+          case 'getlocalstorageitem': return 'GetLocalStorageItem('+e+')';
+          case 'getsessionstorageitem': return 'GetSessionStorageItem('+e+')';
+          case 'stackdepth': return 'sp';
+          }
+          Throw('This cannot happen');
+        }
+        if (name=='instr') {
+          var i = '0';
+          Skip('(');
+          var a = Expression();
+          Skip(',');
+          var b = Expression();
+          if (tok==',') {
+          i=a; a=b;
+          Skip(',');
+          b = Expression();}
+          Skip(')');
+          return '(('+a+').indexOf('+b+','+i+'-1)+1)';
+        }
+        if (name=='atan2'||name=='_atan2'||name=='string$'||
+            name=='left$'||name=='right$'||name=='nvl$') {
+          Skip('(');
+          var a = Expression();
+          Skip(',');
+          var b = Expression();
+          Skip(')');
+          if (name=='atan2' || name=='_atan2') {return 'Math.atan2('+a+','+b+')';
+          } else if (name=='string$') {return 'StringRep('+a+','+b+')';
+          } else if (name=='left$') {return '(('+a+').substr(0,('+b+')))';
+          } else if (name=='right$') {return 'Right(('+a+'),('+b+'))';
+          } else if (name=='nvl$') {return a+'||'+b;
+          } else {throw 'impossible';
+          }
+        }
+        if (name=='_prompt' || name=='_inputbox$') {
+          curop+='Sleep(0.005);\n'; NewOp();
+          Skip('(');
+          var a=Expression();
+			 if (name=='_prompt' && tok==')') {
+			   Skip(')');
+				var b='""';
+			 }
+		    else {
+            Skip(',');
+            if (name=='_inputbox$') {
+              a=Expression();
+				  if (tok==')') {Skip(')'); var b='""'; }
+				  else {Skip(','); var b=Expression(); Skip(')');}
+			   }
+				else {
+              var b=Expression();
+              Skip(')');
+				}
+			 }
+          return 'prompt(('+a+'),('+b+'))';
+        }	
+        if (name=='point') {
+          Skip('(');
+          var a = Expression();
+			 if (tok==',') {
+            Skip(',');
+            var b = Expression();
+            Skip(')');
+            return 'Point(('+a+'), ('+b+'))';
+			 }
+			 else {
+			   Skip(')');
+            return 'PointPos('+a+')';
+			 }
+        }
+		  if (name=='_rgb2bgr') {
+          Skip('(');
+          var a=Expression();
+          Skip(')');
+          return 'RGB2BGR('+a+')';
+        }
+		  if (name=='_rgb'||name=='_rgb32'||name=='_bgr') {
+          Skip('(');
+          var a=Expression();
+          Skip(',');
+          var b=Expression();
+          Skip(',');
+          var c=Expression();
+          Skip(')');
+          if (name=='_bgr') {[a,c]=[c,a];return 'RGB2BGR(RGB2(' + a + ',' + b + ',' + c + '))';}
+          else {return 'RGB2(' + a + ',' + b + ',' + c + ')';}
+		  }
+        if (name=='keystate') {
+          Skip('(');
+          var a;
+          if (tok!=')') {a = Expression();}
+          Skip(')');
+          return 'Keystate('+a+')';
+		  }
+        if (name=='_mousezone') {
+          Skip('(');
+          var a = Expression();
+          Skip(',');
+          var b = Expression();
+          var c = '1'; var d = '1';
+          if (tok==',')  {
+              Skip(','); c = Expression();
+              Skip(','); d = Expression();}
+          Skip(')');
+          return 'MouseZone ('+a+','+b+','+c+','+d+')';
+		  }
+        if (name=='iff') {
+          Skip('(');
+          var a = Expression();
+          Skip(',');
+          var b = Expression();
+          Skip(',');
+          var c = Expression();
+          Skip(')');
+          return '('+ a + ' ? ' + b + ' : ' + c + ')';
+		  }
+        if (name=='between') {
+          Skip('(');
+          var a = Expression();
+          Skip(',');
+          var b = Expression();
+          Skip(',');
+          var c = Expression();
+          var d = '0';
+          if (tok==',')  {Skip(','); d = Expression();}
+          Skip(')');
+          return 'BETWEEN ('+a+','+b+','+c+','+d+')';
+		  }
+        if (name=='min'||name=='max') {
+        // return 'Math.' + name + '(('+a+'),('+b+'))
+          var z = 'Math.' + name + '((';
+          Skip('(');
+          z = z + Expression();
+          while (tok==',') {
+          Skip(',');
+          z = z + '),(' + Expression();
+          }
+          Skip(')');
+          z = z + '))';
+          return '(' + z + ')';
+		  }
+        if (name=='choose') {
+          Skip('(');
+          var a = Expression();
+          var z = '[';
+          while (tok==',') {
+          Skip(',');
+          z = z + Expression() + ',';
+          }
+          Skip(')');
+          z = z.slice(0,-1) + ']'
+          return '('+z+'['+a+'-1])';
+		  }
+        if (name=='mid$' || name=='replace$') {
+          Skip('(');
+          var a = Expression();
+          Skip(',');
+          var b = Expression();
+			 var c = "";
+			 if (name == 'mid$') {
+			   c = a + '.length + 1 -' + b;
+			 };
+			 if (tok == ',') { 
+            Skip(',');
+            c = Expression();
+			 }
+          Skip(')');
+          if (name == 'mid$') {
+            return '((' + a + ').substr((' + b + ') - 1, (' + c + ')))';
+          } else if (name == 'replace$') {
+            return 'StrReplace(' + a + ', ' + b + ', ' + c + ')';
+          }
+        }
+        if (name=='inkey$') {
+          return 'Inkey()';
+        }
+        if (name=='timer') {
+          return 'GetTimer()';
+        }
+        if (functions[name] !== undefined && !functions[name].is_subroutine) {
+          return FunctionCall(name, {is_subroutine: false});
+        }
+        return IndexVariable(name);
+      }
+    }
+
+    function Factor2() {
+      var a = Factor3();
+      while (tok == '^') {
+        Next();
+        var n = '';
+        if (tok=='-') {n=tok;Next();}
+        var b = Factor3();
+        a = 'Math.pow(' + a + ', ' + n + b + ')';
+      }
+      return a;
+    }
+
+    function Factor1() {
+      var ret = '';
+      while (tok == '+' || tok == '-') {
+        ret += tok;
+        Next();
+      }
+      return ret + '(' + Factor2() + ')';
+    }
+
+    function Factor() {
+      var a = Factor1();
+      while (tok == '*' || tok == '/'||tok == '\\'||tok == 'mod'||tok == 'div') {
+        var op = tok;
+        Next();
+        var b = Factor1();
+        if (op=='\\'||op=='div') {a = 'Math.floor((' + a + ')/(' + b + '))';}
+        else if (op=='mod') {a = '((' + a + ')%(' + b + '))';}
+        else {a = '(' + a + ')' + op + '(' + b + ')';}
+      }
+      return a;
+    }
+
+    function Term() {
+      var a = Factor();
+      while (tok == '+' || tok == '-') {
+        var op = tok;
+        Next();
+        var b = Factor();
+        a = '(' + a + ')' + op + '(' + b + ')';
+      }
+      return a;
+    }
+
+    function Relational() {
+      var a = Term();
+      while (tok == '=' || tok == '<' || tok == '>' ||
+             tok == '<>' || tok == '<=' || tok == '>=' || tok == '=>') {
+        var op = tok;
+        Next();
+		  var op2 = op + tok;
+		  if (op2 == '<>' || op2 == '<=' || op2 == '>=' || op2 == '=>') {
+		    op = op2;
+			 Next();
+		  }
+        if (op == '=>') {
+          op = '>=';
+        }
+        var b = Term();
+        if (op == '=') {
+          a = '(' + a + ') == (' + b + ') ? -1 : 0';
+        } else if (op == '<>') {
+          a = '(' + a + ') != (' + b + ') ? -1 : 0';
+        } else {
+          a = '(' + a + ') ' + op + ' (' + b + ') ? -1 : 0';
+        }
+      }
+      return a;
+    }
+
+    function Logical1() {
+      var ret = '';
+      while (tok == 'not') {
+        Next();
+        ret += '~';
+      }
+      return ret + '(' + Relational() + ')';
+    }
+
+    function Logical() {
+      var a = Logical1();
+      while (tok == 'and') {
+        Next();
+        var b = Logical1();
+        a = '(' + a + ') & (' + b + ')';
+      }
+      return a;
+    }
+
+    function Logical03() {
+      var a = Logical();
+      while (tok == 'imp') {
+        Next();
+        var b = Logical();
+        a = '-Math.abs(+(!(' + a + '|' + b + ') | ' + b + '))';
+      }
+      return a;
+    }
+
+    function Logical02() {
+      var a = Logical03();
+      while (tok == 'eqv') {
+        Next();
+        var b = Logical03();
+        a = '-Math.abs(+(' + a + '==' + b + '))';
+      }
+      return a;
+    }
+
+    function Logical01() {
+      var a = Logical02();
+      while (tok == 'xor') {
+        Next();
+        var b = Logical02();
+//        a = '-Math.abs(+('+a+'? !'+b+':'+b+'))';
+        a = '('+a+')^('+b+')';
+      }
+      return a;
+    }
+
+    function Expression() {
+      var a = Logical01();
+      while (tok == 'or') {
+        Next();
+        var b = Logical01();
+        a = '(' + a + ') | (' + b + ')';
+      }
+      return a;
+    }
+
+    function TypeName() {
+      if (SIMPLE_TYPE_INFO[tok]) {
+        var type = tok;
+        Next();
+        return type;
+      } else if (tok == 'integer') {
+        Skip('integer');
+        return 'short';
+      } else if (tok == 'any') {
+        Skip('any');
+        // TODO: Handle this properly.
+        return 'string';
+      } else if (types[tok] !== undefined) {
+        var type_name = tok;
+        if (types[type_name] === undefined) {
+          Throw('Undefined type');
+        }
+        Next();
+        return type_name;
+      }
+      Throw('Undefined type "' + tok + '"');
+    }
+
+    function ImplicitType(name) {
+      return IMPLICIT_TYPE_MAP[name.slice(-2)] || IMPLICIT_TYPE_MAP[name.slice(-1)] ||
+        letter_default[name[0]] || 'single';
+    }
+
+    function Align(alignment) {
+      allocated = Math.floor((allocated + alignment - 1) /
+          alignment) * alignment;
+    }
+
+    function Allocate(size) {
+      Align(size > 8 ? 8 : size);
+      var ret = allocated;
+      allocated += size;
+      return ret;
+    }
+
+    function DimScalarVariable(name, type_name, defaults) {
+      var info = types[type_name] || SIMPLE_TYPE_INFO[type_name];
+      if (info === undefined) {
+        Throw('Unknown type');
+      }
+      var size = info.size;
+      var offset = Allocate(size);
+      vars[name] = {
+        offset: offset,
+        dimensions: 0,
+        type_name: type_name,
+        global: vars === global_vars,
+      };
+      if (inside_type) {
+        var_decls += '//   field ' + name + ' is at ' + offset + '\n';
+      } else if (vars[name].global) {
+        var_decls += '// ' + name + ' is at ' + offset + '\n';
+      } else {
+        if (inside_function) {
+          curop += '//   ' + name + ' is at (bp + ' + offset + ')\n';
+        } else {
+          var_decls += '//   ' + name + ' is at (bp + ' + offset + ')\n';
+        }
+      }
+      if (defaults.length > 0) {
+        curop += IndexVariable(name, true) + ' = ' + defaults[0] + ';\n';
+      }
+    }
+
+    function MaybeImplicitDimVariable(name, argument_to_function) {
+      // TODO: Handle array variables.
+      if (argument_to_function &&
+          argument_to_function.vars[name] !== undefined) {
+        return argument_to_function.vars[name];
+      }
+      if (vars[name] !== undefined) {
+        return vars[name];
+      }
+      if (global_vars[name] !== undefined) {
+        return global_vars[name];
+      }
+      if (option_explicit) {
+        Throw('Undeclared variable ' + name);
+      }
+      var type_name = ImplicitType(name);
+      DimScalarVariable(name, type_name, []);
+      return vars[name];
+    }
+
+    function ArrayPart(offset, i) {
+      return SIMPLE_TYPE_INFO['long'].view +
+        '[((' + offset + '>>2)+' + i + ')]';
+    }
+
+    function ReserveArrayCell(name) {
+      if (vars[name] === undefined &&
+          global_vars[name] == undefined) {
+        var offset = Allocate(4 + MAX_DIMENSIONS * 4 * 2);
+        vars[name] = {
+          offset: offset,
+          dimensions: null,
+          type_name: null,
+          global: vars === global_vars,
+        };
+        var boffset = offset;
+        if (!vars[name].global) {
+          boffset = '(bp+' + boffset + ')';
+        }
+        var_decls += '// ' + name + ' is at ' + ArrayPart(boffset, 0) +
+          ' (cell-addr: ' + offset + ')\n';
+      }
+      if (vars[name] !== undefined) {
+        return vars[name];
+      }
+      return global_vars[name];
+    }
+
+    function DimVariable(default_tname,redim,is_declare) {
+      var name=tok;
+      Next();
+      // Pick default.
+      if (default_tname===null) {default_tname=ImplicitType(name);}
+      var type_name=default_tname;
+      var dimensions=[];
+      var defaults=[];
+      var is_scalar=true;
+      if (tok == '(') {
+        Skip('(');
+		  if (tok==')') {Throw(name+' : missing dimension(s) for array?');}
+        is_scalar=false;
+        while (tok!=')') {
+          var e=Expression();
+          var d='dim'+const_count++;
+//cjv var_decls+='const '+d+'=('+e+');\n';
+          curop+='const '+d+'=('+e+');\n'; //cjv
+          if (tok=='to') {
+            Skip('to');
+            var e1 = Expression();
+            var d1='dim'+const_count++;
+//cjv            var_decls += 'const ' + d1 + ' = (' + e1 + ');\n';
+            curop += 'const ' + d1 + ' = (' + e1 + ');\n'; //cjv
+            dimensions.push([d, d1]);
+          } else {
+            dimensions.push([option_base, d]);
+          }
+          if (tok != ',') {
+            break;
+          }
+          Skip(',');
+        }
+        Skip(')');
+        if (tok == '=') {
+          Skip('=');
+          Skip('{');
+          var e = Expression();
+          defaults.push(e);
+          while (tok == ',') {
+            Skip(',');
+            var e = Expression();
+            defaults.push(e);
+          }
+          Skip('}');
+        }
+      } else if (tok == '=') {
+        Skip('=');
+        var e = Expression();
+        defaults.push(e);
+      }
+      if (tok == 'as') {
+        Skip('as');
+        type_name = TypeName();
+      }
+      if (vars[name] !== undefined && vars[name].dimensions != null) {
+        if (redim) {
+          return;
+        }
+        Throw('Variable ' + name + ' defined twice');
+      }
+      if (is_scalar) {
+        DimScalarVariable(name, type_name, defaults);
+      } else {
+        if (dimensions.length > MAX_DIMENSIONS) {
+          Throw('Too many dimensions');
+        }
+        var offset = ReserveArrayCell(name).offset;
+        var info = types[type_name] || SIMPLE_TYPE_INFO[type_name];
+        var parts = [];
+        for (var i = 0; i < dimensions.length; i++) {
+          parts.push('((' + dimensions[i][1] + ')-(' +
+            dimensions[i][0] + ')+1)');
+        }
+        if (!is_declare) {
+          if (!vars[name].global) {
+            offset = '(bp+' + offset + ')';
+          }
+          curop += '// Allocate ' + name + '\n';
+          curop += 'if (' + ArrayPart(offset, 0) + ' === 0) {\n';
+          curop += '  ' + ArrayPart(offset, 0) + ' = Allocate(' +
+            [info.size].concat(parts).join('*') + ');\n';
+          for (var i = 0; i < dimensions.length; i++) {
+            curop += '  ' + ArrayPart(offset, i * 2 + 1) + ' = ' +
+              dimensions[i][0] + ';\n';
+            curop += '  ' + ArrayPart(offset, i * 2 + 2) + ' = ' +
+              [info.size].concat(parts).slice(0, i + 1).join('*') + ';\n';
+          }
+          if (defaults.length > 0) {
+            if (dimensions.length > 1) {
+              Throw('Only 1-d array defaults supported');
+            }
+            if (!SIMPLE_TYPE_INFO[type_name]) {
+              Throw('Only simple type array defaults supported');
+            }
+            for (var i = 0; i < defaults.length; i++) {
+              curop += '  ' + info.view + '[' +
+                ' + (' + ArrayPart(offset, 0) + ' >> ' + info.shift + ') + '
+                + i + '] = (' + defaults[i] + ');\n';
+            }
+          }
+          curop += '}\n';
+        }
+        vars[name] = {
+          offset: offset,
+          dimensions: dimensions.length > 0 ? dimensions.length : -1,
+          type_name: type_name,
+          global: vars === global_vars,
+        };
+      }
+    }
+
+    function IndexVariable(name, assignable, argument_to_function) {
+      var v = MaybeImplicitDimVariable(name, argument_to_function);
+      var offset = v.offset;
+      if (!v.global) {
+        if (argument_to_function) {
+          offset = '(sp+' + offset + ')';
+        } else {
+          offset = '(bp+' + offset + ')';
+        }
+      }
+      var type_name = v.type_name;
+      while (!argument_to_function && (tok == '(' || tok == '.')) {
+        if (tok=='(') {
+          Skip('(');
+          var dims=[];
+			 var e='';
+          while (tok!=')') {
+				e=Expression();
+            dims.push(e);
+            if (tok!=',') {break;}
+            Skip(',');
+          }
+			 if (e=='') {Throw(name+': undeclared function');}
+          Skip(')');
+          var info=types[type_name]||SIMPLE_TYPE_INFO[type_name];
+          // Extra indirection for array parameter access.
+          if (v.dimensions === -1) {
+            offset = 'i[' + offset + ']';
+          }
+          var noffset = '(';
+          noffset += ArrayPart(offset, 0) + ' + (';
+          if (v.dimensions !== -1 && dims.length != v.dimensions) {
+			   if (v.dimensions==0) {
+//				    Throw(name+': undeclared array/function');
+				    Throw(name+': missing dimension or parameter');
+				}
+				else {
+                Throw('Array dimension expected ' + v.dimensions +
+                  ' but found ' + dims.length + ', array named: ' + name);
+				}
+          }
+          for (var i = 0; i < dims.length; ++i) {
+            noffset += '(((' + dims[i] + ')|0)-' +
+                ArrayPart(offset, i * 2 + 1) + ')';
+            noffset += '*' + ArrayPart(offset, i * 2 + 2);
+            if (i != dims.length - 1) {
+              noffset += '+';
+            }
+          }
+          noffset += '))';
+          offset = noffset;
+        } else if (tok == '.') {
+          Skip('.');
+          v = types[type_name];
+          if (v === undefined) {
+            Throw('Not a struct type');
+          }
+          var field = v.vars[tok];
+          if (field === undefined) {
+            Throw('Invalid field name');
+          }
+          Next();
+          offset = '(' + offset + ' + ' + field.offset + ')';
+          type_name = field.type_name;
+        }
+      }
+      var info = SIMPLE_TYPE_INFO[type_name];
+      if (!info) {
+        Throw('Expected simple type');
+      }
+      var vname = info.view + '[' + offset + '>>' + info.shift + ']';
+      if (info.view == 'str' && assignable === undefined) {
+        vname = '((' + vname + ')||"")';
+      }
+      return vname;
+    }
+
+    function FunctionDefine(options) {
+      var name = tok;
+      Next();
+      if (vars !== global_vars) {
+        Throw('Nested SUB/FUNCTION not allowed');
+      }
+      if (functions[name] !== undefined && !functions[name].is_declaration) {
+        Throw('SUB/FUNCTION/CONST/EQN already defined: ' + name);
+      }
+      NewOp();
+      var pos = ops.length - 1;
+      var parameters = [];
+      var old_allocated = allocated;
+      allocated = 0;
+      vars = {};
+      var nfunc = {
+        vars: vars,
+        parameters: parameters,
+        ip: ops.length,
+        allocation: -1,
+        is_subroutine: options.is_subroutine || false,
+        is_declaration: options.is_declaration || false,
+      };
+      if (nfunc.is_declaration) {
+        if (nfunc.is_subroutine) {
+          var_decls += '// SUB ' + name + '\n';
+        } else {
+          var_decls += '// FUNCTION ' + name + '\n';
+        }
+      } else {
+        if (nfunc.is_subroutine) {
+          curop += '// SUB ' + name + '\n';
+        } else {
+          curop += '// FUNCTION ' + name + '\n';
+        }
+      }
+      if (!nfunc.is_declaration) {
+        inside_function = true;
+      }
+      DimScalarVariable(name, ImplicitType(name), []);
+      // In case return value gets redefined.
+      Align(8);
+      if (tok == '(') {
+        Skip('(');
+        if (tok != ')') {
+          parameters.push(tok);
+          DimVariable(null, undefined, true);
+          while (tok == ',') {
+            Skip(',');
+            parameters.push(tok);
+            DimVariable(null, undefined, true);
+          }
+        }
+        Skip(')');
+        Align(8);
+      }
+      nfunc.allocation = allocated;
+      if (options.is_declaration) {
+        vars = global_vars;
+        allocated = old_allocated;
+        if (functions[name] == undefined) {
+          functions[name] = nfunc;
+        } else {
+          // TODO: Check for declaration mismatch in type.
+          if (functions[name].parameters.length != nfunc.parameter.length) {
+            Throw('DECLARE and definition parameters do not match');
+          }
+        }
+      } else {
+        function_old_allocated = old_allocated;
+        function_define_pos = pos;
+        function_name = name;
+        functions[name] = nfunc;
+      }
+      if (tok == 'as') {
+        Skip('as');
+        var type_name = TypeName();
+        if (!SIMPLE_TYPE_INFO[type_name]) {
+          Throw('Expected basic type');
+        }
+        functions[name].type_name = type_name;
+      }
+      if (tok == 'static') {
+        Skip('static');
+        // TODO: Implement.
+      }
+    }
+
+    function FunctionExit() {
+      if (vars === global_vars) {
+        Throw('SUB/FUNCTION EXIT only allowed inside SUB/FUNCTION.');
+      }
+      curop += 'sp -= 8; ip = i[sp>>2];\n';
+      NewOp();
+    }
+
+    function FunctionEnd() {
+      if (vars === global_vars) {
+        Throw('SUB/FUNCTION END only allowed at end of SUB/FUNCTION.');
+      }
+      inside_function = false;
+      FunctionExit();
+      ops[function_define_pos] += 'ip = ' + ops.length + ';\n';
+      vars = global_vars;
+      Align(8);
+      functions[function_name].allocation = allocated;
+      function_name = null;
+      allocated = function_old_allocated;
+    }
+
+    function FunctionCall(name,options) {
+      var func=functions[name];
+		if (func==undefined) {Throw(name+' is undeclared');}
+      if (options.is_subroutine!==func.is_subroutine) {
+        if (options.is_subroutine) {
+          Throw('Expected valid subroutine name, found: ' + name);
+        } else {
+          Throw('Expected valid function name, found: ' + name);
+        }
+      }
+      curop += 'i[sp>>2] = bp; sp += 8;\n';
+      var has_parens = tok == '(' || func.parameters.length != 0;
+      if ((options.is_call && has_parens) || (!options.is_subroutine && has_parens) || (!options.is_call && options.is_subroutine && has_parens)) {
+        Skip('(',name);
+      }
+      var args = [];
+      for (var i = 0; i < func.parameters.length; ++i) {
+        if (func.vars[func.parameters[i]].dimensions == -1) {
+          var vname = tok;
+          Next();
+          Skip('(');
+          Skip(')');
+          args.push(null);
+          curop += 'i[sp + ' + func.vars[func.parameters[i]].offset + '] = ' +
+            VarPtr(vname) + ';\n';
+        } else {
+          var old_tok_count = tok_count;
+          var old_tok = tok;
+          var e = Expression();
+          curop += IndexVariable(func.parameters[i], true, func) +
+            ' = ' + e + ';\n';
+          if (vars[old_tok] && tok_count - old_tok_count == 1) {
+            args.push(old_tok);
+          } else {
+            args.push(null);
+          }
+        }
+        if (i != func.parameters.length - 1) {
+          Skip(',');
+        }
+      }
+      if ((options.is_call && has_parens) || (!options.is_subroutine && has_parens) || (!options.is_call && options.is_subroutine && has_parens)) {
+        Skip(')');
+      }
+      // Blank return value.
+      if (!options.is_subroutine) {
+        curop += IndexVariable(name, true, func) + ' = 123;\n';
+      }
+      curop += 'bp = sp;\n';
+      curop += 'sp += functions["' + name + '"].allocation;\n';
+      curop += 'i[sp>>2] = ip; sp += 8;\n';
+      curop += 'ip = functions["' + name + '"].ip;\n';
+      NewOp();
+      // TODO: Types?
+      curop += 'sp -= functions["' + name + '"].allocation;\n';
+      curop += 'bp = i[(sp-8)>>2];\n';
+      var temp = '#temp' + temp_count;
+      if (!options.is_subroutine) {
+        ++temp_count;
+        DimScalarVariable(temp, func.vars[name].type_name, []);
+        curop += IndexVariable(temp, true) +
+          ' = ' + IndexVariable(name, false, func) + ';\n';
+      }
+      for (var i = 0; i < args.length; ++i) {
+        if (args[i]) {
+          curop += IndexVariable(args[i], true) + ' = ' +
+            IndexVariable(func.parameters[i], false, func) + ';\n';
+        }
+      }
+      curop += 'sp -= 8;\n';
+      if (!options.is_subroutine) {
+        return IndexVariable(temp, false);
+      }
+    }
+
+    function End() {
+		Sleep(0.5); yielding=1; autodisplay=1; quitting=1;
+      if (canvas) {
+        console.log('=== BASIC END ===');
+		  setTimeout(function(){alert('=== END OF PROGRAM HAS BEEN REACHED ===')},10);
+      } else {
+        if (output_buffer!='') {
+          PutCh(null);
+        }
+      }
+    }
+
+    function SetClipboardText(t) {
+    	navigator.clipboard.writeText(t);
+    }
+	 
+    function fOpen(fname,fmode,fnum) {
+    	localStorage.setItem('file'+fnum,'');
+		localStorage.setItem('file'+fnum+'_name',fname);
+    }
+	 
+    function fPrint(fnum, t, sttmnt) {
+      if (t.length==0) {
+        t = '\n';
+      }
+		else if (t.slice(-1)!==';' && t.slice(-1)!==',') {
+		t = t + '\n';
+		}
+    	sessionStorage.setItem('file' + fnum, (sessionStorage.getItem('file' + fnum)) + t);
+    }
+	 
+	 function fClose(fnum) {
+      hiddenElement.href = 'data:attachment/text,' + encodeURIComponent(localStorage.getItem('file' + fnum));
+      hiddenElement.target = '_blank';
+      hiddenElement.download = localStorage.getItem('file' + fnum  + '_name') || 'BAM_' + fnum + '.txt';
+      hiddenElement.click();
+	 }
+	 	 
+    function Lprint(t) {
+		spool_text=spool_text+t+'\n';
+      if (!spool_name) {
+        EndSpool();
+		}
+    }
+	 
+    function EndSpool() {
+      hiddenElement.href = 'data:attachment/text,' + encodeURIComponent(spool_text);
+      hiddenElement.target = '_blank';
+      hiddenElement.download = spool_name || 'BAM_LPRINT_Output.txt';
+      hiddenElement.click();
+		CancelSpool();
+    }
+	 
+    function CancelSpool() {
+      spool_name='';
+		spool_text='';
+    }
+	 
+    function OpenWindow(c) {
+    if ( window.location == window.parent.location ) {
+      var html = '<!DOCTYPE html><meta title="BAM Output" /><body></body>';
+		openwindow = window.open('', 'ThisBamOutputWindow', '');
+      openwindow.document.write(html);
+		openwindow.document.body.innerHTML = c.replace('script',' script');
+    }}
+
+    function GetWinWidth() {return innerWidth;}
+    function GetWinHeight() {return innerHeight;}
+
+    function MapSet(k,v) {
+    	gmap.set(k,v);
+    }
+
+    function MapGet(k) {
+    	var v = gmap.get(k);
+      if (v===undefined) {v=""}
+		return v;
+    }
+
+    function ClearLocalStorage() {
+    	localStorage.clear();
+    }
+
+    function RemoveLocalStorageItem(k) {
+    	localStorage.removeItem(k);
+    }
+
+    function SetLocalStorageItem(k,v) {
+    	localStorage.setItem(k,v);
+    }
+
+    function GetLocalStorageItem(k) {
+    	var v = localStorage.getItem(k);
+      if (v === null) { v = ""}
+		return v;
+    }
+
+    function SetSessionStorageItem(k,v) {
+    	sessionStorage.setItem(k,v);
+    }
+
+    function GetSessionStorageItem(k) {
+    	var v = sessionStorage.getItem(k);
+      if (v === null) { v = ""}
+		return v;
+    }
+
+    function Sleep(t) {
+      yielding = 1;
+      delay = t * 1000;
+    }
+    
+		function GetChr(k) {
+      var v = "";
+			var n=0;
+		  var f = font_height;
+      for (let r=0;r<8;r++) {
+      for (let c=0;c<8;c++) {
+			  n = font_data[k*64*f/8+r*8*f/8+c];
+			  if (n==0) {v=v+'.';} else {v=v+'X';}
+			}
+      }
+			return v;
+		}
+		
+    function LetChr(k,v) {
+		  var f = font_height;
+		  var n=0;
+      for (let r=0;r<8;r++) {
+      for (let c=0;c<8;c++) {
+			  if (v[r*8+c]=='X') {n=255;} else {n=0;}
+        font_data[r*f + c +k*64*f/8]=n;
+				if (f==16) {font_data[(r)*f+8 + c +k*64*f/8]=n;}
+			}
+      }
+    }
+	 
+    function MouseWheel() {
+      var mwnow = mouse_wheel;
+		mouse_wheel = 0;
+      return mwnow;
+    }
+	 
+	 function InitAudio() {globalAudioContext = new (window.AudioContext || window.webkitAudioContext)();}
+	 function EndAudio() {yielding = 0; for (var i = 0; i < audio_queue.length; i++) { clearTimeout(audio_queue.pop());} audio_queue_timer = 0;}
+	 function AudioDone() {return -(audio_queue_timer<GetTimer());}
+	 
+	 function Sound(f,d) {
+	   if (globalAudioContext==undefined) {InitAudio();}
+	   function do_sound(f,d) {
+		  audio.createNotes(f, d);
+		}
+      var audio = new Audio();
+		var my_timeout = 0;
+      if (audio_queue_timer<GetTimer())
+		     {audio_queue_timer=GetTimer();}
+		else {my_timeout=(audio_queue_timer-GetTimer())*1000}
+		audio_queue_timer += d/18.2;
+      var TimeoutID = setTimeout(do_sound, my_timeout, f, d);
+		audio_queue.push(TimeoutID);
+	 }
+	 
+	 function Sound2(f,d) {
+	   //if (typeof o!=='undefined') {o.stop();}
+	   if (typeof o!=='undefined') {
+      o.stop();
+      o.disconnect();
+      g.disconnect(); }
+      g = acontext.createGain();
+	   o = acontext.createOscillator();
+      //var g = acontext.createGain();
+      o.connect(g);
+      g.connect(acontext.destination);
+      g.gain.value = 64/(Math.log(f)**2);
+      g.gain.setValueAtTime(g.gain.value, acontext.currentTime); 
+      g.gain.exponentialRampToValueAtTime(0.0001, acontext.currentTime + d/18.2);
+      o.type=sndwave;
+      o.frequency.value=f;
+      o.start();
+		
+      yielding = 1;
+      delay = d/18.2 * 1000;
+    }
+    
+    function Keystate(k) {
+       if (k==undefined) {return keyPressed;}
+       if (keyState[k]==true) {return -1;}
+    return 0;
+    }
+
+    function Inkey() {
+      yielding = 1;
+      if (keys.length > 0) {
+        return keys.shift();
+      } else {
+        return '';
+      }
+    }
+	 
+	 function KeyClear() {
+	   while (keys.length > 0) {Inkey();}
+    }
+	 
+    function Yield() {yielding=1;}
+
+    function Right(s,n) {return s.substr(s.length-n);}
+	 
+    function PointPos(f) {
+	   if (f==0||f==2) {return pen_x;}
+	   if (f==1||f==3) {return pen_y;}
+    }
+
+    function Point(x,y) {
+	   x=Math.floor(x);
+		y=Math.floor(y);
+      var c=display_data[x+y*display.width];
+		if (color_map==undefined) {
+		  return RGB2((c&0x000000ff),((c&0x0000ff00)>>8),((c&0x00ff0000)>>16));
+		}
+		if (color_map.length==16||color_map.length==256) {
+		  return color_map.indexOf(c-0xff000000-0x1000000);
+		}
+		if (color_map.length==2) {
+		  return color_map.indexOf(c);
+		}
+		if (color_map.length==4) {
+		  if (c==0xff000000) {
+		    return 0;
+		  }
+		  return color_map.indexOf(c-0xff000000-0x1000000);
+		}
+		return color_map;
+    }
+
+    function StringRep(n, ch) {
+      var ret = '';
+      var cch;
+      if (typeof ch == 'string') {
+        cch = ch;
+      } else {
+        cch = String.fromCharCode(ch);
+      }
+      for (var i = 0; i < n; ++i) {
+        ret += cch;
+      }
+      return ret;
+    }
+
+    function ToString(s) {
+      if (s < 0) {
+        return s.toString();
+      } else {
+        return ' ' + s.toString();
+      }
+    }
+
+    function StrReplace(str,replaceWhat,replaceTo) {
+      replaceWhat = replaceWhat.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+      var re = new RegExp(replaceWhat, 'g');
+      return str.replace(re,replaceTo);
+    }
+
+    function Peek(addr) {
+      return 0;
+    }
+
+    function RGB(r, g, b) {
+      return BLACK | r | (g << 8) | (b << 16);
+    }
+	 
+	 function RGB2(r,g,b) {
+      return +("0x" + ("0" + Math.floor(r).toString(16)).slice(-2) + ("0" + Math.floor(g).toString(16)).slice(-2) + ("0" + Math.floor(b).toString(16)).slice(-2));
+	 }
+    
+	 function RGB2BGR(v) {
+      var cr = Math.floor(v/256/256);
+      var cg = Math.floor((v-cr*256*256)/256);
+      var cb = v-cr*256*256-cg*256;
+      return RGB(cr,cg,cb);
+	 }
+   
+	 function MouseZone(x,y,w,h) {
+     if (mouse_x>=x && mouse_x<=(x+w-1) && mouse_y>=y && mouse_y<=(y+h-1))
+     {return -1;}
+     return 0;
+	 }
+   
+	 function BETWEEN(a,b,c,d) {
+     if (d==0) {return ((a<b)?0:((a>c)?0:-1));}
+     else {return ((a<=b)?0:((a>=c)?0:-1));}
+	 }
+    
+    function DefModes() {
+      // TODO: Handle color right in CGA, EGA, VGA modes.
+      var L=0x55,M=0xAA,H=0xFF;
+      var p2=[BLACK,WHITE];
+      var p4=[BLACK,RGB(0,M,M),RGB(M,0,M),RGB(M,M,M)];
+      var p16=[
+        RGB(0,0,0),RGB(0,0,M),RGB(0,M,0),RGB(0,M,M),RGB(M,0,0),RGB(M,0,M),RGB(M,L,0),RGB(M,M,M),
+        RGB(L,L,L),RGB(L,L,H),RGB(L,H,L),RGB(L,H,H),RGB(H,L,L),RGB(H,L,H),RGB(H,H,L),RGB(H,H,H)];
+      var p256=[
+        RGB(0,0,0),RGB(0,0,M),RGB(0,M,0),RGB(0,M,M),RGB(M,0,0),RGB(M,0,M),RGB(M,M,0),RGB(M,M,M),
+        RGB(0,0,L),RGB(0,0,H),RGB(0,M,L),RGB(0,M,H),RGB(M,0,L),RGB(M,0,H),RGB(M,M,L),RGB(M,M,H),
+        RGB(0,L,0),RGB(0,L,M),RGB(0,H,0),RGB(0,H,M),RGB(M,L,0),RGB(M,L,M),RGB(M,H,0),RGB(M,H,M),
+        RGB(0,L,L),RGB(0,L,H),RGB(0,H,L),RGB(0,H,H),RGB(M,L,L),RGB(M,L,H),RGB(M,H,L),RGB(M,H,H),
+        RGB(L,0,0),RGB(L,0,M),RGB(L,M,0),RGB(L,M,M),RGB(H,0,0),RGB(H,0,M),RGB(H,M,0),RGB(H,M,M),
+        RGB(L,0,L),RGB(L,0,H),RGB(L,M,L),RGB(L,M,H),RGB(H,0,L),RGB(H,0,H),RGB(H,M,L),RGB(H,M,H),
+        RGB(L,L,0),RGB(L,L,M),RGB(L,H,0),RGB(L,H,M),RGB(H,L,0),RGB(H,L,M),RGB(H,H,0),RGB(H,H,M),
+        RGB(L,L,L),RGB(L,L,H),RGB(L,H,L),RGB(L,H,H),RGB(H,L,L),RGB(H,L,H),RGB(H,H,L),RGB(H,H,H),
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,RGB(H,H,H)];
+      return {
+        0: [640,200,2.4,8,p16,4], 1: [320,200,1.2,8,p4,2],
+        2: [640,200,2.4,8,p2,1], 7: [320,200,1.2,8,p16,4],
+        8: [640,200,2.4,8,p16,4], 9: [640,350,480/350,14,p16,4],
+        10: [640,350,480/350,14,p2,1], 11: [640,480,1,16,p2,1],
+        12: [640,480,1,16,p16,4], 13: [320,200,1.2,8,p256,8],
+        14: [320,200,1,8,p256,8], 15: [320,200,2.4,8,p256,8],
+        16: [320,200,1.2,16,p256,8], 17: [320,200,1,16,p256,8],
+        23: [640,400,1.2,8,undefined,24],
+        24: [640,400,1,8,undefined,24], 25: [640,400,2.4,8,undefined,24],
+        26: [640,400,1.2,16,undefined,24], 27: [640,400,1,16,undefined,24]
+      }
+    }
+    
+    function InitPalette() {
+      var modes=DefModes();
+      var m=modes[screen_mode];
+      color_map=m[4];
+//      reverse_color_map = {};
+      if (color_map !== undefined) {
+        for (var i = 0; i < color_map.length; ++i) {
+          reverse_color_map[color_map[i]] = i;
+        }
+        fg_color = color_map[color_map.length - 1];
+        bg_color = color_map[0];
+      } else {
+        fg_color = WHITE;
+        bg_color = BLACK;
+      }
+    }
+    
+    function Screen(mode, m0, m1) {
+	     if (mode==32) {mode=27;}
+		  else if ( [0,1,2,7,8,9,10,11,12,13,14,15,16,17,23,24,25,26,27].indexOf(mode) == -1) {
+		      mode = 0;
+		      curr_mode= 0;
+		  }
+		  else {curr_mode = mode;}
+        if (!canvas) {return;}
+      // TODO: Handle color right in CGA, EGA, VGA modes.
+ //     var monochrome=DefPal(2);
+      // cjv: adding 16 colors to rgba for gw-basic compatibility was a bad idea; reverted
+//      var p16=DefPal(16);
+//      var p256=DefPal(256);
+//      var screen1=DefPal(4);
+      var modes=DefModes();
+      var m=modes[mode];
+      if (m===undefined) {
+        Throw('Invalid mode '+mode);
+      }
+      if (m0!=undefined) {
+        m[0]=m0;
+      }
+      if (m1!=undefined) {
+        m[1]=m1;
+      }
+		curr_width=m[0];
+		curr_height=m[1];
+      SetupDisplay(m[0],m[1],m[2],m[3]);
+		window.dispatchEvent(new Event('resize'));
+      color_map=m[4];
+      screen_bpp=m[5];
+      reverse_color_map = {};
+      if (color_map !== undefined) {
+        for (var i = 0; i < color_map.length; ++i) {
+          reverse_color_map[color_map[i]] = i;
+        }
+        fg_color = color_map[color_map.length - 1];
+        bg_color = color_map[0];
+      } else {
+        fg_color = WHITE;
+        bg_color = BLACK;
+      }
+      screen_mode = mode;
+      pen_x = display.width / 2;
+      pen_y = display.height / 2;
+      Cls(0);
+    }
+
+    function Width(w) {
+      //if (screen_mode == 0 && (w == 80 || w == 40)) {
+      //  SetupDisplay(w * 8, display.height, w == 80 ? 2.4 : 1.2, font_height);
+      //}
+      var modes=DefModes();
+      var m=modes[screen_mode];
+      if (m[0] > 0) {
+        SetupDisplay(w * 8, display.height, ( w * m[2] / (m[0]/8) ), font_height);
+        Cls(0);}
+    }
+    
+    function Height(w) {
+      var modes=DefModes();
+      var m=modes[screen_mode];
+      if (m[0] > 0) {
+        var ny = w * m[3];
+        var nx = display.width * (ny/display.height);
+        SetupDisplay(display.width, ny, ( nx * m[2] / (m[0]/font_height) ), font_height);
+        Cls(0);}
+    }
+
+    var output_buffer = '';
+
+    function PutCh(ch) {
+      if (!canvas) {
+        if (ch == null) {
+          console.log(output_buffer);
+          output_buffer = '';
+        } else {
+          output_buffer += ch;
+        }
+        return;
+      }
+      if (ch == null) {
+        text_x = 0;
+        text_y++;
+      }
+		else {
+        var fg = fg_color;
+        var bg = bg_color;
+        var chcode = (ch.charCodeAt(0) & 0xff) >>> 0;
+        var chpos = chcode * font_height * 8;
+        for (var y = 0; y < font_height; ++y) {
+          var pos = text_x * 8 + (y + text_y * font_height) * display.width;
+          for (var x = 0; x < 8; ++x) {
+            display_data[pos++] = font_data[chpos++] ? fg : bg;
+          }
+        }
+        text_x++;
+        if (text_x >= text_width) {
+          text_y++;
+          text_x = 0;
+        }
+		}
+      if (text_y >= text_height) {
+        text_y = text_height - 1;
+        for (var i = (font_height*display.width - 1); i < (display.width * display.height - 1); i++) {
+           display_data[i-(font_height*display.width)] = display_data[i];
+        }
+        for (var i = ((display.width*display.height)-(font_height*display.width)); i < (display.width * display.height - 1); i++) {
+           display_data[i] = bg_color;
+        }
+      }
+    }
+    
+    function Pcopy(x1,y1,x2,y2,s,d) {
+        var srcdata;
+        if (x1==undefined || x1<0) {x1=0;}
+        if (y1==undefined || y1<0) {y1=0;}
+        if (x2==undefined || Math.floor(x2)>display.width-1) {x2=display.width-1;}
+        if (y2==undefined || Math.floor(y2)>display.height-1) {y2=display.height-1;}
+        x1=Math.floor(x1);y1=Math.floor(y1);
+        x2=Math.floor(x2);y2=Math.floor(y2);
+        switch(s) {
+         case -1:
+           srcdata = page0; break;
+         case 0:
+           srcdata = display_data; break;
+         case 1:
+           if (page1==undefined) {alert("Page 1 is undefined");}
+           srcdata = page1; break;
+         case 2:
+           if (page2==undefined) {alert("Page 2 is undefined");}
+           srcdata = page2; break;
+         default:
+           alert(s + " is an invalid source page for PCOPY."); return;
+        }
+        switch(d) {
+          case -1:
+            page0=[...srcdata];
+            break;
+          case 0:
+            if (x1==0 && y1==0 && x2==display.width-1 && y2==display.height - 1) {
+                 for (var i = 0; i < display.width * display.height; i++) {
+                   display_data[i] = srcdata[i];}}
+            else {for (var y = y1; y < y2+1; y++) {
+                    for (var x = x1; x < x2+1; x++) {
+                      display_data[x+y*display.width] = srcdata[x+y*display.width];
+            }}}
+            break;
+          case 1:
+            if (page1==undefined) {page1=[...srcdata];}
+            else if (x1==0 && y1==0 && x2==display.width-1 && y2==display.height - 1) {page1=[...srcdata];}
+            else {for (var y = y1; y < y2+1; y++) {
+                    for (var x = x1; x < x2+1; x++) {
+                      page1[x+y*display.width] = srcdata[x+y*display.width];
+            }}}
+            break;
+          case 2:
+            if (page2==undefined) {page2=[...srcdata];}
+            else if (x1==0 && y1==0 && x2==display.width-1 && y2==display.height - 1) {page2=[...srcdata];}
+            else {for (var y = y1; y < y2+1; y++) {
+                    for (var x = x1; x < x2+1; x++) {
+                        page2[x+y*display.width] = srcdata[x+y*display.width];
+            }}}
+            break;
+         default:
+           alert(d + " is an invalid destination page for PCOPY."); return;
+        }
+    }
+    
+    function Scroll(x1,y1,x2,y2,h,v,w) {
+        var tempdata;tempdata = [...display_data];
+        var wx=0; var wy=0;
+        if (x1==undefined || x1<0) {x1=0;}
+        if (y1==undefined || y1<0) {y1=0;}
+        if (x2==undefined || x2>display.width-1) {x2=display.width-1;}
+        if (y2==undefined || y2>display.height-1) {y2=display.height-1;}
+        x1=Math.floor(x1); y1=Math.floor(y1); x2=Math.floor(x2); y2=Math.floor(y2); h=Math.floor(h);v=Math.floor(v);
+        h=h%(x2-x1);v=v%(y2-y1);
+        var xMin = x1; var xMax = x2; var yMin = y1; var yMax = y2;
+        if (h<0) {xMax += h;} else {xMin += h;}
+        if (v<0) {yMax += v; } else {yMin += v;}
+//        alert('xMin: ' + xMin + 'xMax: ' + xMax + 'yMin: ' + yMin + 'yMax: ' + yMax +              '\ndisplay.width:' + display.width + 'display.height:' + display.height);
+        for (var y = y1; y < y2+1; y++) {
+            for (var x = x1; x < x2+1; x++) {
+            if (y>=yMin && y<=yMax && x>=xMin && x<=xMax) {
+                display_data[x + y * display.width] = tempdata[x + y * display.width - h - v*display.width];}
+            else {
+                if (w==0) {display_data[x + y * display.width] = bg_color;}
+                else {
+                    if (x<xMin) {wx=xMax-(xMin-x)+1;} else if (x>xMax) {wx=xMin+(x-xMax)-1;} else {wx=x-h;}
+                    if (y<yMin) {wy=yMax-(yMin-y)+1;} else if (y>yMax) {wy=yMin+(y-yMax)-1;} else {wy=y-v;}
+                    display_data[x + y * display.width] = tempdata[wx + wy * display.width];}
+                }
+        }
+        }
+
+    }
+
+    function LineInput() {
+      while (keys.length > 0) {
+        const key = keys.shift();
+        if (key == String.fromCharCode(13)) {
+          --text_x;
+          PutCh(' ');
+          PutCh(null);
+          return;
+        }
+        if (key == String.fromCharCode(8) && input_string.length > 0) {
+          input_string = input_string.substr(0, input_string.length - 1);
+          --text_x;
+          PutCh(' ');
+          text_x -= 2;
+          PutCh(String.fromCharCode(219));
+        }
+        if (key.charCodeAt(0) >= 32 && key.charCodeAt(0) <= 126) {
+          --text_x;
+          PutCh(key);
+          PutCh(String.fromCharCode(219));
+          input_string += key;
+        }
+      }
+      yielding = 1;
+      --ip;
+    }
+
+    function Print(items, sttmnt='p', fnum=null) {
+      if (items.length==0) {
+        PutCh(null);
+        return;
+      }
+      for (var i=0;i<items.length;i+=2) {
+		  var cs = '';
+        var text;
+        if (items[i]===undefined) {
+          text='';
+        }
+		  else {
+          text=items[i].toString();
+			 if (sttmnt=='w' && isNaN(text)) {text='"'+text+'"';}
+        }
+        for (var j = 0; j < text.length; j++) {
+		    if (fnum!==null) {localStorage.setItem('file' + fnum, (localStorage.getItem('file' + fnum) + text[j]));}
+          else {PutCh(text[j]);}
+        }
+        if (items[i+1] == ',' || items[i+1] == ';') {
+		    if (sttmnt == 'w') {
+			   if (fnum!==null) {
+				  localStorage.setItem('file' + fnum, (localStorage.getItem('file' + fnum) + ','));
+				}
+				else {PutCh(',');}
+			 }
+			 else {
+			   if (items[i+1] == ',') {cs='\t';} else {cs='';}
+			   if (fnum!==null) {
+				  localStorage.setItem('file' + fnum, (localStorage.getItem('file' + fnum) + cs));
+				}
+				else if (cs=='\t') {
+              PutCh(' ');
+              PutCh(' ');
+              PutCh(' ');
+				}
+			 }
+        }
+		  if (items[i+1] == undefined) {
+	       if (fnum==null) {PutCh(null);}
+          else {localStorage.setItem('file' + fnum, (localStorage.getItem('file' + fnum) + '\n'));}
+		  }
+      }
+    }
+
+    function Using(format, value) {
+      var sgn = value < 0 ? -1 : (value > 0 ? 1 : 0);
+      value = Math.abs(value);
+      var before = 0;
+      var after = 0;
+      var found_point = false;
+      for (var i = 0; i < format.length; ++i) {
+        if (format[i] == '.') {
+          found_point = true;
+        } else if (format[i] == '#') {
+          if (found_point) {
+            ++after;
+          } else {
+            ++before;
+          }
+        }
+      }
+      var t = value;
+      var fail = Math.floor(t * Math.pow(10, -before)) > 0;
+      value = value * Math.pow(10, after);
+      var ret = '';
+      var done = false;
+      for (var i = format.length - 1; i >= 0; --i) {
+        if (format[i] == '#') {
+          if (fail) {
+            ret = '*' + ret;
+          } else if (done) {
+            ret = ' ' + ret;
+          } else {
+            ret = Math.floor(value % 10) + ret;
+            value = Math.floor(value / 10);
+            if (value == 0) {
+              done = true;
+            }
+          }
+        } else if (format[i] == '+' || format[i] == '-') {
+          if (fail) {
+            ret = '*' + ret;
+          } else if (sgn < 0) {
+            ret = '-' + ret;
+          } else if (sgn > 0) {
+            if (format[i] == '+') {
+              ret = '+' + ret;
+            }
+          } else {
+            ret = ' ' + ret;
+          }
+        } else if (format[i] == ',') {
+          if (fail) {
+            ret = '*' + ret;
+          } else if (done) {
+            ret = ' ' + ret;
+          } else {
+            ret = ',' + ret;
+          }
+        } else {
+          ret = format[i] + ret;
+        }
+      }
+      return ret;
+    }
+
+    function PrintUsing(format, items) {
+      var parts = [];
+      var p = '';
+      var has_num = false;
+      for (var i = 0; i < format.length; ++i) {
+        if (format[i] == '#' || format[i] == ',' || format[i] == '.') {
+          has_num = true;
+        } else {
+          if (has_num) {
+            parts.push(p)
+            p = '';
+            has_num = false;
+          }
+        }
+        p += format[i];
+      }
+      if (p != '') {
+        if (has_num) {
+          parts.push(p);
+        } else {
+          parts[parts.length - 1] += p;
+        }
+      }
+      var values = [];
+      for (var i = 0; i < items.length; i += 2) {
+        if (parts.length * 2 > i) {
+          items[i] = Using(parts[(i / 2) | 0], items[i]);
+        }
+      }
+      Print(items);
+    }
+
+    function ColorFlip(c) {
+      return BLACK |
+        ((c & 0xff0000) >> 16) | ((c & 0xff) << 16) | (c & 0x00ff00);
+    }
+
+    function FixupColor(c) {
+
+      if (c === undefined) {c=fg_id;}
+      if (c === undefined) {
+        if (color_map ) {
+          return color_map[color_map.length - 1];
+        } else {
+          return WHITE;
+        }
+      }
+      if (color_map !== undefined) {
+        // cjv: gw-basic compatibility hack
+        var cml = color_map.length;
+        c = ((c % cml ) + cml) % cml;
+        return color_map[(c%color_map.length)] || color_map[color_map.length - 1]; // cjv || BLACK;
+      } else {
+          c = c | 0;return ColorFlip(c);
+      }
+    }
+    
+    function Palette(c, v) {if (c < color_map.length) {color_map[c] = v;reverse_color_map[color_map[c]] = c;}}
+	 
+    function Color(fg, bg) {
+      if (fg != undefined) {fg_color = FixupColor(fg);fg_id=fg;};
+		  if (bg != undefined) {bg_color = FixupColor(bg);bg_id=bg;};
+    }
+
+//    function Color_old(fg, bg) {
+//      if (screen_mode == 0 || screen_mode > 2) {
+//        if (fg != undefined) fg_color = FixupColor(fg);
+//      } else {
+//        fg_color = FixupColor(undefined);
+//      }
+//      if (screen_mode == 0 || screen_mode > 2) {
+//        if (bg != undefined) bg_color = FixupColor(bg);
+//      } else {
+//        bg_color = FixupColor(undefined);
+//      }
+//    }
+
+    function Locate(x, y) {
+	   if (x != 0) { text_x = x - 1;}
+      if (y != 0) {text_y = y - 1;}
+      // Hack to yield more often (for NIBBLES.BAS)
+      if (x == 1 && y == 1) {
+        yielding = 1;
+      }
+    }
+
+    function Box(x1, y1, x2, y2, c) {
+      x1 = x1 | 0;
+      y1 = y1 | 0;
+      x2 = x2 | 0;
+      y2 = y2 | 0;
+      c = c | 0;
+      if (x1 > x2) {
+        var t = x2;
+        x2 = x1;
+        x1 = t;
+      }
+      if (y1 > y2) {
+        var t = y2;
+        y2 = y1;
+        y1 = t;
+      }
+      if (x1 >= display.width ||
+          y1 >= display.height ||
+          x2 < 0 || y2 < 0) {
+        return;
+      }
+      if (x1 < 0) x1 = 0;
+      if (x2 > display.width - 1) x2 = display.width - 1;
+      if (y1 < 0) y1 = 0;
+      if (y2 > display.height - 1) y2 = display.height - 1;
+      for (var y = y1; y <= y2; ++y) {
+        var pos = x1 + y * display.width;
+        for (var x = x1; x <= x2; ++x) {
+          display_data[pos++] = c;
+        }
+      }
+    }
+
+    function RawLine(x1, y1, x2, y2, c) {
+      x1 = x1 | 0;
+      y1 = y1 | 0;
+      x2 = x2 | 0;
+      y2 = y2 | 0;
+      if (x1 == x2 || y1 == y2) {
+        Box(x1, y1, x2, y2, c);
+        return;
+      }
+      if (Math.abs(x1 - x2) > Math.abs(y1 - y2)) {
+        if (x1 > x2) {
+          var tmp;
+          tmp = x1; x1 = x2; x2 = tmp;
+          tmp = y1; y1 = y2; y2 = tmp;
+        }
+        for (var x = x1; x <= x2; ++x) {
+          var t = (x - x1) / (x2 - x1);
+          // cjv: Changed Math.floor to Math.round, then back to floor (20230924)
+          var y = y1 + Math.floor(t * (y2 - y1));
+          Box(x, y, x, y, c);
+        }
+      } else {
+        if (y1 > y2) {
+          var tmp;
+          tmp = x1; x1 = x2; x2 = tmp;
+          tmp = y1; y1 = y2; y2 = tmp;
+        }
+        for (var y = y1; y <= y2; ++y) {
+          var t = (y - y1) / (y2 - y1);
+          // cjv: Changed Math.floor to Math.round, then back to floor (20230924)
+          var x = x1 + Math.floor(t * (x2 - x1));
+          Box(x, y, x, y, c);
+        }
+      }
+    }
+
+    function Line(x1, y1, x2, y2, c, fill) {
+      var pen_color = FixupColor(c);
+      if (fill == 0) {
+        // Should be line.
+        RawLine(x1, y1, x2, y2, pen_color);
+      } else if (fill == 1) {
+        Box(x1, y1, x2, y1, pen_color);
+        Box(x1, y2, x2, y2, pen_color);
+        Box(x1, y1, x1, y2, pen_color);
+        Box(x2, y1, x2, y2, pen_color);
+      } else {
+        Box(x1, y1, x2, y2, pen_color);
+      }
+    }
+    var last = 0;
+
+    function Line2(x1, y1, x2, y2, c, fill) {
+      var pen_color = FixupColor(c);
+      if (fill == 0) {
+        // Should be line.
+        RawLine(x1, y1, x2, y2, pen_color);
+      } else if (fill == 1) {
+        Box(x1, y1, x2, y1, pen_color);
+        Box(x1, y2, x2, y2, pen_color);
+        Box(x1, y1, x1, y2, pen_color);
+        Box(x2, y1, x2, y2, pen_color);
+      } else {
+        Box(x1, y1, x2, y2, pen_color);
+      }
+		pen_x = x2;
+		pen_y = y2;
+    }
+    var last = 0;
+
+    function Cls(mode) {
+      // TODO: Handle mode.
+      Box(0, 0, display.width, display.height, bg_color);
+      text_x = 0;
+      text_y = 0;
+    }
+
+    function Pset(x, y, c) {
+	   x = Math.floor(x);
+		 y = Math.floor(y);
+     if (x<0 || y<0 || x>=display.width || y>=display.height) {}
+     else {
+		   var pen_color = FixupColor(c);
+		   if (c==-1) {pen_color=bg_color;}
+		   else if (c==-2) {pen_color=fg_color;}
+       display_data[x + y * display.width] = pen_color;
+       pen_x = x;
+       pen_y = y;
+    }
+    }
+    
+    function Pset2(x, y, c) {
+	   x = Math.floor(x);
+		 y = Math.floor(y);
+     if (x<0 || y<0 || x>=display.width || y>=display.height) {}
+     else {
+       display_data[x + y * display.width] = c;
+    }}
+    
+    function Circle(x, y, r, c, start, end, aspect, fill) {
+      x=Math.floor(x);
+		  y=Math.floor(y);
+      r=Math.floor(r);
+      var pen_color = FixupColor(c);
+		  if (c==-1) {pen_color=bg_color;}
+		  else if (c==-2) {pen_color=fg_color;}
+      var complete = false;
+      if (start < 0) { start = -start; complete = true; }
+      if (end < 0) { end = -end; complete = true; }
+      if (end < start) {
+        end += Math.PI * 3;
+      }
+      var rx, ry;
+      if (aspect == null) {
+        rx = r;
+        ry = r / screen_aspect;
+      } else if (aspect > 1) {
+        rx = r / aspect;
+        ry = r;
+      } else {
+        rx = r;
+        ry = r * aspect;
+      }
+      if (start != 0 || (end != Math.PI * 3) || aspect != null) {
+     x += 0.5;
+     y += 0.5;
+      var oxx = x + Math.cos(start) * rx;
+      var oyy = y - Math.sin(start) * ry;
+      if (complete) {
+        RawLine(x, y, oxx, oyy, pen_color);
+      }
+      for (var ang = start; ang <= end; ang += 0.03) {
+        var xx = x + Math.cos(ang) * rx;
+        var yy = y - Math.sin(ang) * ry;
+        if (ang == start) { oxx = xx; oyy = yy; }
+        RawLine(oxx, oyy, xx, yy, pen_color);
+        oxx = xx;
+        oyy = yy;
+      }
+      if (complete) {
+        RawLine(x, y, xx, yy, pen_color);
+        }
+        }
+      else {
+        var a; 
+        function DoPset2(x,xy,a,y,asa,xysa) {
+              Pset2(x+xy,y-asa, pen_color);
+              Pset2(x-xy,y-asa, pen_color);
+              Pset2(x+xy,y+asa, pen_color);
+              Pset2(x-xy,y+asa, pen_color);
+              Pset2(x-a,y+xysa, pen_color);
+              Pset2(x-a,y-xysa, pen_color);
+              Pset2(x+a,y+xysa, pen_color);
+              Pset2(x+a,y-xysa, pen_color);
+            if (fill==2) {
+              Pset2(x+xy-1,y-asa, pen_color);
+              Pset2(x-xy+1,y-asa, pen_color);
+              Pset2(x+xy-1,y+asa, pen_color);
+              Pset2(x-xy+1,y+asa, pen_color);
+              Pset2(x-a+1,y+xysa, pen_color);
+              Pset2(x-a+1,y-xysa, pen_color);
+              Pset2(x+a-1,y+xysa, pen_color);
+              Pset2(x+a-1,y-xysa, pen_color);
+              Pset2(x+xy,y-asa+1, pen_color);
+              Pset2(x-xy,y-asa+1, pen_color);
+              Pset2(x+xy,y+asa-1, pen_color);
+              Pset2(x-xy,y+asa-1, pen_color);
+              Pset2(x-a,y+xysa-1, pen_color);
+              Pset2(x-a,y-xysa+1, pen_color);
+              Pset2(x+a,y+xysa-1, pen_color);
+              Pset2(x+a,y-xysa+1, pen_color);}
+        }
+        for (var xy = 0; xy < r*0.8; xy += 1) {
+            a = Math.round(Math.sqrt(r * r - xy * xy));
+//              DoPset2(x,xy,a,y,(a),xy);
+              DoPset2(x,xy,a,y,(a/screen_aspect),xy/screen_aspect);
+             
+            }
+      } 
+      if (fill==1 && start == 0 && end > Math.PI * 2) {
+        Paint(x, y, c, c);
+      }
+      pen_x = x;
+      pen_y = y;
+    }
+
+
+    function Circle_OLD(x, y, r, c, start, end, aspect, fill) {
+      x=Math.floor(x);
+		  y=Math.floor(y);
+      r=Math.floor(r);
+      var pen_color = FixupColor(c);
+      var complete = false;
+      if (start < 0) { start = -start; complete = true; }
+      if (end < 0) { end = -end; complete = true; }
+      if (end < start) {
+        end += Math.PI * 3;
+      }
+      var rx, ry;
+      if (aspect == null) {
+        rx = r;
+        ry = r / screen_aspect;
+      } else if (aspect > 1) {
+        rx = r / aspect;
+        ry = r;
+      } else {
+        rx = r;
+        ry = r * aspect;
+      }
+      if (start != 0 || (end != Math.PI * 3) || aspect != null) {
+     x += 0.5;
+     y += 0.5;
+      var oxx = x + Math.cos(start) * rx;
+      var oyy = y - Math.sin(start) * ry;
+      if (complete) {
+        RawLine(x, y, oxx, oyy, pen_color);
+      }
+      for (var ang = start; ang <= end; ang += 0.03) {
+        var xx = x + Math.cos(ang) * rx;
+        var yy = y - Math.sin(ang) * ry;
+        if (ang == start) { oxx = xx; oyy = yy; }
+        RawLine(oxx, oyy, xx, yy, pen_color);
+        oxx = xx;
+        oyy = yy;
+      }
+      if (complete) {
+        RawLine(x, y, xx, yy, pen_color);
+        }
+        }
+      else {
+        var a; var a_ar; var xy_ar;
+        for (var xy = 0; xy < r*0.8; xy += 1) {
+            a = Math.round(Math.sqrt(r * r - xy * xy));
+              Pset(x+xy,y-(a/screen_aspect), c);
+              Pset(x-xy,y-(a/screen_aspect), c);
+              Pset(x+xy,y+(a/screen_aspect), c);
+              Pset(x-xy,y+(a/screen_aspect), c);
+              Pset(x-a,y+(xy/screen_aspect), c);
+              Pset(x-a,y-(xy/screen_aspect), c);
+              Pset(x+a,y+(xy/screen_aspect), c);
+              Pset(x+a,y-(xy/screen_aspect), c);
+              
+              Pset(x+xy-1,y-(a/screen_aspect), c);
+              Pset(x-xy+1,y-(a/screen_aspect), c);
+              Pset(x+xy-1,y+(a/screen_aspect), c);
+              Pset(x-xy+1,y+(a/screen_aspect), c);
+              Pset(x-a+1,y+(xy/screen_aspect), c);
+              Pset(x-a+1,y-(xy/screen_aspect), c);
+              Pset(x+a-1,y+(xy/screen_aspect), c);
+              Pset(x+a-1,y-(xy/screen_aspect), c);
+
+              Pset(x+xy,y-(a/screen_aspect)+1, c);
+              Pset(x-xy,y-(a/screen_aspect)+1, c);
+              Pset(x+xy,y+(a/screen_aspect)-1, c);
+              Pset(x-xy,y+(a/screen_aspect)-1, c);
+              Pset(x-a,y+(xy/screen_aspect)-1, c);
+              Pset(x-a,y-(xy/screen_aspect)+1, c);
+              Pset(x+a,y+(xy/screen_aspect)-1, c);
+              Pset(x+a,y-(xy/screen_aspect)+1, c);
+            }
+      } 
+      if (fill && start == 0 && end > Math.PI * 2) {
+        Paint(x, y, c, c);
+      }
+      pen_x = x;
+      pen_y = y;
+    }
+
+    function GetImage(x1, y1, x2, y2, buffer, offset) {
+      x1 = x1 | 0;
+      y1 = y1 | 0;
+      x2 = x2 | 0;
+      y2 = y2 | 0;
+		if (x1>x2) {[x1,x2]=[x2,x1];}
+		if (y1>y2) {[y1,y2]=[y2,y1];}
+      var d16 = new Uint16Array(buffer);
+      if (screen_bpp <= 2) {
+        d16[(offset >> 1) + 0] = (x2 - x1 + 1) * screen_bpp;
+      } else {
+        d16[(offset >> 1) + 0] = (x2 - x1 + 1);
+      }
+      d16[(offset >> 1) + 1] = y2 - y1 + 1;
+      var d = new Uint8Array(buffer);
+      var src = display_data;
+      if (screen_bpp > 8) {
+        var dstpos = offset + 4;
+        for (var y = y1; y <= y2; ++y) {
+          var srcpos = x1 + y * display.width;
+          for (var x = x1; x <= x2; ++x) {
+            var v = src[srcpos++];
+            d[dstpos++] = v;
+            d[dstpos++] = (v >> 8);
+            d[dstpos++] = (v >> 16);
+          }
+        }
+      } else {
+        var dstpos = offset + 4;
+        var shift = 8;
+        var v = 0;
+        for (var y = y1; y <= y2; ++y) {
+          var srcpos = x1 + y * display.width;
+          for (var x = x1; x <= x2; ++x) {
+            shift -= screen_bpp;
+            var cc = reverse_color_map[src[srcpos++] | BLACK] | 0;
+            v |= (cc << shift);
+            if (shift == 0) {
+              d[dstpos++] = v;
+              v = 0;
+              shift = 8;
+            }
+          }
+          if (shift != 8) {
+            d[dstpos++] = v;
+            v = 0;
+            shift = 8;
+          }
+        }
+      }
+    }
+
+    function PutImage(x1, y1, buffer, offset, mode) {
+      x1 = x1 | 0;
+      y1 = y1 | 0;
+      var s16 = new Uint16Array(buffer);
+      var x2;
+      if (screen_bpp <= 2) {
+        x2 = x1 + (s16[(offset >> 1) + 0] / screen_bpp) - 1;
+      } else {
+        x2 = x1 + s16[(offset >> 1)] - 1;
+      }
+      var y2 = y1 + s16[(offset >> 1) + 1] - 1;
+      var s = new Uint8Array(buffer);
+      var dst = display_data;
+      if (screen_bpp > 8) {
+        var srcpos = offset + 4;
+        for (var y = y1; y <= y2; ++y) {
+          var dstpos = x1 + y * display.width;
+          for (var x = x1; x <= x2; ++x) {
+            var v = s[srcpos] | (s[srcpos + 1] << 8) | (s[srcpos + 2] << 16);
+            srcpos += 3;
+            // TODO: Optimize
+            if (x < 0 || x >= display.width || y < 0 || y >= display.height) {
+              dstpos++;
+              continue;
+            }
+            if (mode == 'xor') {
+              dst[dstpos++] = (dst[dstpos] ^ v) | BLACK;
+            } else if (mode == 'preset') {
+              dst[dstpos++] = (~v) | BLACK;
+            } else if (mode == 'and') {
+              dst[dstpos++] = (dst[dstpos] & v) | BLACK;
+            } else if (mode == 'or') {
+              dst[dstpos++] = (dst[dstpos] | v) | BLACK;
+            } else {
+              dst[dstpos++] = v | BLACK;
+            }
+          }
+        }
+      } else {
+        var srcpos = offset + 4;
+        var mask = (1 << screen_bpp) - 1;
+        for (var y = y1; y <= y2; ++y) {
+          var dstpos = x1 + y * display.width;
+          var v = 0;
+          var shift = 8;
+          for (var x = x1; x <= x2; ++x) {
+            if (shift == 8) {
+              v = s[srcpos++];
+            }
+            shift -= screen_bpp;
+            var cc = (v >> shift) & mask;
+            var old = reverse_color_map[dst[dstpos] | BLACK] | 0;
+            if (mode == 'xor') {
+              cc ^= old;
+            } else if (mode == 'preset') {
+              cc = cc ^ mask;
+            } else if (mode == 'and') {
+              cc &= old;
+            } else if (mode == 'or') {
+              cc |= old;
+            }
+    //        alert('color_map[cc]: ' + color_map[cc]);
+            var px = color_map[cc] | 0;
+            // TODO: Optimize
+            if (y >= 0 && y < display.height && x >= 0 && x < display.width) {
+              dst[dstpos++] = px;
+            } else {
+              dstpos++;
+            }
+            if (shift == 0) {
+              shift = 8;
+            }
+          }
+        }
+      }
+    }
+
+    var draw_state = {
+      noplot: false,
+      nomove: false,
+      angle: 0,
+      turn_angle: 0,
+      color: undefined,
+      scale: 1,
+    };
+
+    function StepUnscaled(dx, dy) {
+      if (!draw_state.noplot) {
+        Line(pen_x, pen_y, pen_x + dx, pen_y + dy, draw_state.color, 0);
+      }
+      if (!draw_state.nomove) {
+        pen_x += dx;
+        pen_y += dy;
+      }
+      draw_state.noplot = false;
+      draw_state.nomove = false;
+    }
+
+    function Step(dx, dy) {
+      StepUnscaled(dx * draw_state.scale, dy * draw_state.scale);
+    }
+
+    function Draw(cmds) {
+	   function AngleStep(a_inc) {Step((Math.cos(a+(a_inc*Math.PI/180))*n),(-Math.sin(a+(a_inc*Math.PI/180))*n));}
+	   var a=null;
+      cmds = cmds.toLowerCase();
+ 	   cmds = cmds.replace(/\s+/g, '');
+ 	   cmds = cmds.replace(/;/g, '');
+ 	   cmds = cmds.replace(/=/g, '');
+		var m;
+      while (cmds.length) {
+        if (m = cmds.match(/^(u|d|l|r|e|f|g|h|a|ta|c|s)([0-9]+)?/)) {
+          var op = m[1];
+          var n = m[2] == '' ? 1 : parseInt(m[2]);
+          if (op == 'c') {
+            draw_state.color = n;
+          } else if (op=='a') {
+				a=n*90*(Math.PI/180);
+          } else if (op=='ta') {
+				a=n*(Math.PI/180);
+          } else if (op=='s') {
+            draw_state.scale = n / 4;
+          } else if (op=='u') {
+			   if (a==null) {Step(0,-n);}
+				else {AngleStep(90);}
+          } else if (op=='d') {
+			   if (a==null) {Step(0,n);}
+				else {AngleStep(270);}
+          } else if (op=='l') {
+			   if (a==null) {Step(-n,0);}
+				else {AngleStep(180);}
+          } else if (op=='r') {
+			   if (a==null) {Step(n,0);}
+				else {AngleStep(0);}
+          } else if (op=='e') {
+			   if (a==null) {Step(n,-n);}
+				else {AngleStep(45);}
+          } else if (op=='f') {
+			   if (a==null) {Step(n,n);}
+				else {AngleStep(315);}
+          } else if (op=='g') {
+			   if (a==null) {Step(-n,n);}
+				else {AngleStep(225);}
+          } else if (op=='h') {
+			   if (a==null) {Step(-n,-n);}
+				else {AngleStep(135);}
+          }
+        } else if (m = cmds.match(/^(m)([+-]?)([0-9]+)[,]([+-]?[0-9]+)/)) {
+          var op = m[1];
+          var sx = m[2];
+          var x = parseInt(m[3]);
+          var y = parseInt(m[4]);
+          if (sx) {
+            x = parseInt(sx + '1') * x;
+            Step(x, y);
+          } else {
+            StepUnscaled(x - pen_x, y - pen_y);
+          }
+        } else if (m = cmds.match(/^(p)([0-9]+),([0-9]+1)/)) {
+          var op = m[1];
+          var x = parseInt(m[2]);
+          var y = parseInt(m[3]);
+          // TODO: Implement.
+        } else if (m = cmds.match(/^(b|n)/)) {
+          var op = m[1];
+          if (op == 'b') {
+            draw_state.noplot = true;
+          } else if (op == 'n') {
+            draw_state.nomove = true;
+          }
+        } else {
+          Throw('Bad drop op: ' + cmds);
+        }
+        cmds = cmds.substr(m[0].length);
+      }
+    }
+
+    function Paint(x, y, paint, border) {
+      paint = FixupColor(paint);
+      if (border === undefined) {
+        border = paint;
+      } else {
+        border = FixupColor(border) & 0xffffff;
+      }
+      var fpaint = paint & 0xffffff;
+      var data = display_data;
+      var pending = [];
+      pending.push([Math.floor(x), Math.floor(y)]);
+      while (pending.length) {
+        var p = pending.pop();
+        if (p[0] < 0 || p[0] >= display.width ||
+            p[1] < 0 || p[1] >= display.height) {
+          continue;
+        }
+        var pos = p[0] + p[1] * display.width;
+        if ((data[pos] & 0xffffff) == border ||
+            (data[pos] & 0xffffff) == fpaint) {
+          continue;
+        }
+        data[pos] = paint;
+        pending.push([p[0] - 1, p[1]]);
+        pending.push([p[0] + 1, p[1]]);
+        pending.push([p[0], p[1] - 1]);
+        pending.push([p[0], p[1] + 1]);
+      }
+    }
+
+    function GetVar() {
+      var name = tok;
+      Next();
+      return IndexVariable(name, true);
+    }
+
+    var DEFAULT_TYPES = {
+      'defdbl': 'double',
+      'defsng': 'single',
+      'defint': 'short',
+      'deflng': 'long',
+      'defstr': 'string',
+    };
+
+    function Statement() {
+      if (EndOfStatement()) {
+        // Ignore empty lines.
+      } else if (tok == 'rem') {
+        do {
+          Next();
+        } while (tok != '<EOL>');
+      } else if (tok == 'if') {
+        Skip('if');
+        var e = Expression();
+		  if (tok == 'goto') {
+		  Skip ('goto');
+		  } else
+		  {
+        Skip('then');
+		  }
+        if (EndOfStatement()) {
+          If(e);
+          while (tok == ':') {
+            Skip(':');
+            Statement();
+          }
+          if (tok == 'else') {
+            Skip('else');
+            Else();
+            while (tok == ':') {
+              Skip(':');
+              Statement();
+            }
+          }
+          if (tok == 'end') {
+            Skip('end');
+            Skip('if');
+            EndIf();
+          }
+        } else {
+          // Classic if <e> then
+          If(e);
+          if (tok.match(/^[0-9]+$/)) {
+            var name = tok;
+            Next();
+            curop += 'ip = labels[("' + name + '").replace(/^0+/, "")];\n';
+            NewOp();
+          } else {
+            Statement();
+            while (tok == ':') {
+              Skip(':');
+              Statement();
+            }
+          }
+          var f = flow.pop();
+          if (f[0] != 'if') {
+            Throw('If in mixed style');
+          }
+          flow.push(f);
+          NewOp();
+          if (tok == 'else') {
+            Skip('else');
+            Else();
+            Statement();
+            while (tok == ':') {
+              Skip(':');
+              Statement();
+            }
+          }
+          EndIf();
+        }
+      } else if (tok == 'elseif') {
+        Skip('elseif');
+        var e = Expression();
+        Skip('then');
+        ElseIf(e);
+      } else if (tok == 'else') {
+        Skip('else');
+        Else();
+        if (!EndOfStatement()) {
+          Statement();
+        }
+      } else if (tok == 'do') {
+        Skip('do');
+        if (tok == 'while') {
+          // Support DO WHILE
+          Statement();
+          return;
+        }
+        NewOp();
+        flow.push(['do', ops.length]);
+      } else if (tok == 'loop') {
+        Skip('loop');
+        var is_while;
+        if (tok == 'while') {
+          Skip('while');
+          is_while = true;
+        } else if (tok == 'until') {
+          Skip('until');
+          is_while = false;
+        } else if (EndOfStatement()) {
+          var f = flow.pop();
+          if (f[0] != 'while' && f[0] != 'do') {
+            Throw('LOOP does not match DO / WHILE');
+          }
+          curop += 'ip = ' + f[1] + ';\n';
+          NewOp();
+          if (f[0] == 'while') {
+            ops[f[1]] += ops.length + '; }\n';
+          }
+          return;
+        } else {
+          Throw('Expected while/until');
+        }
+        var e = Expression();
+        var f = flow.pop();
+        if (f[0] != 'do') {
+          Throw('LOOP does not match DO');
+        }
+        if (is_while) {
+          curop += 'if (' + e + ') { ip = ' + f[1] + '; }\n';
+        } else {
+          curop += 'if (!(' + e + ')) { ip = ' + f[1] + '; }\n';
+        }
+        NewOp();
+      } else if (tok == 'while') {
+        Skip('while');
+        var e = Expression();
+        NewOp();
+        curop += 'if (!(' + e + ')) { ip = ';
+        NewOp();
+        flow.push(['while', ops.length - 1]);
+      } else if (tok == 'wend') {
+        Skip('wend');
+        var f = flow.pop();
+        if (f[0] != 'while') {
+          Throw('Wend does not match while');
+        }
+        curop += 'ip = ' + f[1] + ';\n';
+        NewOp();
+        ops[f[1]] += ops.length + '; }\n';
+      } else if (tok == 'exit') {
+        Skip('exit');
+        if (tok == 'sub') {
+          Skip('sub');
+          FunctionExit();
+        } else if (tok == 'function') {
+          Skip('function');
+          FunctionExit();
+        } else {
+          Throw('Exit only works with SUB and FUNCTION');
+        }
+      } else if (tok == 'end') {
+        Skip('end');
+        if (tok == 'if') {
+          Skip('if');
+          EndIf();
+        } else if (tok == 'select') {
+          Skip('select');
+          NewOp();
+          var f = flow.pop();
+          if (f[0] != 'select') {
+            Throw('end select outside select');
+          }
+          var disp = 'var t = (' + f[1] + ');\n';
+          disp += 'if (false) {}\n';
+          for (var i = 0; i < f[3].length; i++) {
+            var ii = f[3][i];
+            if (ii[0] == ii[1]) {
+              disp += 'else if (t == (' + ii[0] +
+                      ')) { ip = ' + ii[2] + '; }\n';
+            } else {
+              disp += 'else if (t >= (' + ii[0] + ') && t <= (' + ii[1] +
+                      ')) { ip = ' + ii[2] + '; }\n';
+            }
+          }
+          if (f[5] !== null) {
+            disp += 'else { ip = ' + f[5] + '; }\n';
+          } else {
+            disp += 'else { ip = ' + ops.length + '; }\n';
+          }
+          ops[f[2]] += disp;
+          for (var i = 0; i < f[4].length; i++) {
+            ops[f[4][i]] += 'ip = ' + ops.length + ';\n';
+          }
+        } else if (tok == 'sub') {
+          Skip('sub');
+          FunctionEnd();
+        } else if (tok == 'function') {
+          Skip('function');
+          FunctionEnd();
+        } else {
+		   curop += 'End();\n';
+        }
+      } else if (tok == 'stop') {
+        Skip(tok);
+        Throw('BREAK');
+      } else if (tok == 'goto') {
+        Skip(tok);
+        var name = tok;
+        if (tok=='eval') {Skip(tok);Skip('(');name=Expression();Skip(')');curop += 'ip = labels[((' + name + '.toString()).toLowerCase()).replace(/^0+/, "")];\n';}
+        else {Next();curop += 'ip = labels[("' + name + '").replace(/^0+/, "")];\n';}
+        NewOp();
+      } else if (tok == 'gosub') {
+        Skip(tok);
+        var name = tok;
+        curop += 'i[sp>>2] = ip; sp += 8;\n';
+        if (tok=='eval') {Skip(tok);Skip('(');name=Expression();Skip(')');curop += 'ip = labels[((' + name + '.toString()).toLowerCase()).replace(/^0+/, "")];\n';}
+        else {Next();curop += 'ip = labels[("' + name + '").replace(/^0+/, "")];\n';}
+        NewOp();
+      } else if (tok == 'return') {
+        Skip(tok);
+        curop += 'sp -= 8; ip = i[sp>>2];\n';
+        NewOp();
+      } else if (tok == 'declare') {
+        Skip(tok);
+        if (tok == 'sub') {
+          Skip('sub');
+          FunctionDefine({is_subroutine: true, is_declaration: true});
+        } else if (tok == 'function') {
+          Skip('function');
+          FunctionDefine({is_subroutine: false, is_declaration: true});
+        } else {
+          Throw('Unexpected declaration');
+        }
+      } else if (tok=='type'||tok=='struct'||tok=='structure'||tok=='record') {
+        var lbl=tok;
+        var old_allocated = allocated;
+        vars = {};
+        Skip(tok);
+        var type_name = tok;
+        Next();
+        if (types[type_name] !== undefined) {
+          Throw('Duplicate type definition');
+        }
+        types[type_name] = {
+          vars: vars,
+          size: 0,
+        };
+        inside_type = true;
+        var_decls += '// TYPE ' + type_name + '\n';
+        SkipEndOfStatement();
+        while (tok != 'end') {
+          while (!EndOfStatement()) {
+            DimVariable(null);
+            while (tok == ',') {
+              Skip(',');
+              DimVariable(null);
+            }
+          }
+          SkipEndOfStatement();
+        }
+        Skip('end');
+        Skip(lbl);
+        inside_type = false;
+        types[type_name].size = allocated;
+        vars = global_vars;
+        allocated = old_allocated;
+      } else if (tok == 'defdv') {
+        Skip(tok);
+        for (;;) {
+          var fname = tok;
+          var pos = FunctionDefine({is_subroutine: false});
+          Skip('=');
+          var e = Expression();
+          curop += IndexVariable(fname, true) + ' = ' + e + ';\n';
+          FunctionEnd(pos);
+			 if (tok == ',') {
+            Skip(',');
+            continue;
+          }
+          break;
+        }
+      } else if (tok=='let') {
+        var kw=tok;
+        Skip(tok);
+        while (!EndOfStatement()) {
+        if (tok==',') {Skip(',');}
+        var name = tok;
+        Next();
+        var vname = IndexVariable(name, true);
+        if (constants_list.indexOf('C'+name+'C')>-1) {
+           Throw('A constant named "'+name+'" already exists.');}
+        if (tok=='=' || tok=='+=' || tok=='-=' ||
+            tok=='*=' || tok=='/=' || tok=='\\=' ||
+            tok=='^=' || tok=='&=') {
+          var op = tok;
+          Skip(tok);
+          var e = Expression();
+          if (op == '&=') {
+            op = '+=';
+          } else if (op == '\\=') {
+            op = '//=';
+          }
+          if (op == '^=') {curop += vname + ' = Math.pow(' + vname + ', ' + e + ');\n';}
+          else {curop += vname + ' ' + op + ' (' + e + ');\n';}
+        } else {
+          Throw('Expected "=" or "x=" found "' + tok + '"\n\n(assuming assignment to a variable; could be a case of a misspelled keyword)');
+        }}
+      } else if (tok=='dim'||tok=='redim'||tok=='var'||tok=='const') {
+        var op=tok;
+        Next();
+        if (tok=='shared') {
+          Skip('shared');
+        }
+        var tname = null;
+        if (tok=='as') {
+          Skip('as');
+          tname=TypeName();
+        }
+        if (op=='const' && constants_list.indexOf('C'+tok+'C')==-1)
+           {constants_list=constants_list+'C'+tok+'C';}
+        else if (constants_list.indexOf('C'+tok+'C')>-1) {Throw('A constant named "'+tok+'" already exists.');}
+        DimVariable(tname,op=='redim');
+        while (tok==',') {
+          Skip(',');
+          DimVariable(tname,op=='redim');
+        }
+      } else if (tok == 'on') {
+        Skip('on');
+        var name = Expression();
+        if (tok == 'error') {
+          Skip('error');
+          // TODO: Implement.
+        } else if (tok == 'restore') {
+             Next();
+             if (EndOfStatement()) {
+               Throw('Expected labels.');
+             }
+             var rlbls = ' ';
+             while (!(EndOfStatement())) {
+                rlbls += String(tok) ;
+                Next();
+                if (EndOfStatement()) {} 
+                else {rlbls += ','; Skip(',');}
+             }
+               rlbls=rlbls.replace(/\s+/g, '');
+             curop += 'data_pos = data_labels["'+rlbls+'".split(",")['+name+'-1]];\n';
+             NewOp();
+        }
+          else if (tok == 'goto' || tok == 'gosub') {
+          var isGosub = (tok == 'gosub');
+          Next();
+          if (EndOfStatement()) {
+            Throw('Expected labels.');
+          }
+          if (isGosub) {
+            curop += 'i[sp>>2] = ip; sp += 8;\n';
+          }
+          curop += 'ip = labels[[';
+          while (!(EndOfStatement())) {
+            curop += '\'' + String(tok) + '\'';
+            Next();
+            if (EndOfStatement()) {
+              if (isGosub) {
+                curop += '][((' + name + ')|0) - 1]];\n';
+                curop += 'if(ip == undefined){ sp -= 8; ip = i[sp>>2]; }\n';
+              } else {
+                curop += '][((' + name + ')|0) - 1]] || ip;\n';
+              }
+            } else {
+              curop += tok;
+              Skip(',');
+            }
+          }
+          NewOp();
+        } else {
+          Throw('Expected GOTO/GOSUB or ERROR. Found ' + tok);
+        }
+      } else if (tok == 'resume') {
+        Skip('resume');
+        if (tok == 'next') {
+          Skip('next');
+          // TODO: Implement.
+        } else if (tok == '0') {
+          Skip('0');
+          // TODO: Implement.
+        } else if (!EndOfStatement()) {
+          var name = tok;
+          Next();
+          // TODO: Implement.
+        } else {
+          // TODO: Implement.
+        }
+      } else if (tok == 'sub') {
+        Skip('sub');
+        FunctionDefine({is_subroutine: true});
+      } else if (tok == 'function') {
+        Skip('function');
+        FunctionDefine({is_subroutine: false});
+      } else if (tok == 'def') {
+        Skip('def');
+        if (tok == 'seg') {
+          Skip('seg');
+          if (tok == '=') {
+            Skip('=');
+            var e = Expression();
+            // TODO: Do something useful with it?
+          }
+        } else if (tok.substr(0, 2) == 'fn') {
+          if (tok=='fn') {Skip(tok);}
+          var fname = tok;
+          var pos = FunctionDefine({is_subroutine: false});
+          Skip('=');
+          var e = Expression();
+          curop += IndexVariable(fname, true) + ' = ' + e + ';\n';
+          FunctionEnd(pos);
+        } else {
+          Throw('Expected SEG/FNxxx');
+        }
+      } else if (tok == 'open') {
+        Skip(tok);
+        var fname = Expression();
+        Skip('for');
+		  var fmode = '"' + tok + '"';
+        if (tok == 'input') {
+          Skip(tok);
+        } else if (tok == 'output') {
+          Skip(tok);
+        } else {
+          Throw('Expected input/output');
+        }
+        Skip('as');
+		  tok=tok.replace('#','');
+		  var fnum = Expression();
+		  curop += 'fOpen(' + fname + ',' + fmode + ',' + fnum + ');\n';
+        NewOp();
+      } else if (tok == 'close') {
+        Skip(tok);
+		  tok=tok.replace('#','');
+		  var fnum = Expression();
+//		  Skip(tok);
+		  curop += 'fClose(' + fnum + ');\n';
+        NewOp();
+      } else if (tok == 'system') {
+        Skip(tok);
+        // TODO: Implement.
+      } else if (tok == 'donothing') {
+        Skip(tok);
+      } else if (/^([_]?keyclear)$/.test(tok)) {
+//                 tok=='keyclear'||tok=='_keyclear') {
+        Skip(tok);
+        curop += 'KeyClear();\n';
+        NewOp();
+      } else if (tok == 'beep') {
+        Skip(tok);
+		  curop += 'Sound(800,1);\n';
+        NewOp();
+      } else if (tok == 'view') {
+        Skip('view');
+        if (tok == 'print') {
+          Skip('print');
+          if (!EndOfStatement()) {
+            var top = Expression();
+            Skip('to');
+            var bottom = Expression();
+          }
+          // TODO: Implement.
+        } else if (tok == 'screen') {
+          Skip('screen');
+          // TODO: Implement.
+        } else {
+          Throw('Expected PRINT/SCREEN');
+        }
+      } else if (tok == 'randomize') {
+        Skip('randomize');
+        if (!EndOfStatement()) {var seed = Expression();}
+        // Ignore
+      } else if (tok == 'poke') {
+        Skip('poke');
+        var addr = Expression();
+        Skip(',');
+        var value = Expression();
+        // TODO: Do something useful with it?
+      } else if (tok == 'key') {
+        Skip('key');
+        if (tok == 'on') {
+          Skip('on');
+        } else if (tok == 'off') {
+          Skip('off');
+        } else {
+          Throw('Expected on/off');
+        }
+        // Implement this?
+      } else if (tok == 'setclipboardtext') {
+        Skip(tok);
+		  Skip('(');
+        var t = Expression();
+		  Skip(')');
+        curop += 'SetClipboardText(' + t + ');\n';
+        NewOp();
+      } else if (tok == 'lprint') {
+        Skip(tok);
+        var t = Expression();
+        curop += 'Lprint(' + t + ');\n';
+        NewOp();
+      } else if (tok == '_dumpvars') {
+        Skip(tok);
+        curop += 'SetClipboardText(JSON.stringify(vars, null, 2));\n';
+        NewOp();
+      } else if (tok == '_mapset') {
+        Skip(tok);
+		  Skip('(');
+        var k = Expression();
+		  Skip(',');
+		  var v = Expression();
+		  Skip(')');
+        curop += 'MapSet(' + k + ',' + v + ');\n';
+        NewOp();
+      } else if (tok == 'clearlocalstorage') {
+        Skip(tok);
+        curop += 'ClearLocalStorage();\n';
+        NewOp();
+      } else if (tok == 'removelocalstorageitem') {
+        Skip(tok);
+		  Skip('(');
+        var k = Expression();
+		  Skip(')');
+        curop += 'RemoveLocalStorageItem(' + k + ');\n';
+        NewOp();
+      } else if (tok == 'setlocalstorageitem') {
+        Skip(tok);
+		  Skip('(');
+        var k = Expression();
+		  Skip(',');
+		  var v = Expression();
+		  Skip(')');
+        curop += 'SetLocalStorageItem(' + k + ',' + v + ');\n';
+        NewOp();
+      } else if (tok == 'removelocalstorageitem') {
+        Skip(tok);
+		  Skip('(');
+        var k = Expression();
+		  Skip(')');
+        curop += 'localStorage.removeitem("' + k + '");\n';
+        NewOp();
+      } else if (tok == 'setsessionstorageitem') {
+        Skip(tok);
+		  Skip('(');
+        var k = Expression();
+		  Skip(',');
+		  var v = Expression();
+		  Skip(')');
+        curop += 'SetSessionStorageItem(' + k + ',' + v + ');\n';
+        NewOp();
+      } else if (tok == '_letchr$') {
+        Skip(tok); Skip('('); var k = Expression();
+		    Skip(','); var v = Expression(); Skip(')');
+        curop += 'LetChr(' + k + ',' + v + ');\n'; NewOp();
+      } else if (tok == 'sound') {
+        Skip(tok);
+        var freq = Expression();
+        Skip(',');
+        var duration = Expression();
+        curop += 'Sound(' + freq + ',' + duration + ');\n';
+        NewOp();
+      } else if (tok == '_initaudio') {
+        Skip(tok);
+        curop += 'InitAudio();\n';
+        NewOp();
+        curop += 'Sound(10,18.2);\n';
+        NewOp();
+        curop += 'Sleep(1.25);\n';
+        NewOp();
+      } else if (tok == '_finishaudio') {
+        Skip(tok);
+        curop += 'Sleep(audio_queue_timer-GetTimer());\n';
+        NewOp();
+      } else if (tok=='_endaudio') {
+        Skip(tok);
+        curop+='EndAudio();\n';
+        NewOp();
+      } else if (tok=='_sndwave') {
+        Skip(tok);
+        var w=Expression();
+        curop+='sndwave=('+w+').toLowerCase();\n';
+        NewOp();
+      } else if (tok=='_sndfade') {
+        Skip(tok);
+        var w=Expression();
+        curop+='sndfade=('+w+').toLowerCase();\n';
+        NewOp();
+      } else if (tok=='play') {
+        Skip('play');
+        var notes=Expression();
+        // TODO
+      } else if (tok=='_startspool') {
+        Skip(tok);
+        var w=Expression();
+        curop+='spool_name='+w+';\n';
+        NewOp();
+      } else if (tok=='_endspool') {
+        Skip(tok);
+        curop+='EndSpool();\n';
+        NewOp();
+      } else if (tok=='_cancelspool') {
+        Skip(tok);
+        curop += 'CancelSpool();\n';
+        NewOp();
+      } else if (tok=='draw') {
+        Skip(tok);
+        var cmds=Expression();
+        curop+='Draw(' + cmds + ');\n';
+      } else if (tok == 'chain') {
+        Skip(tok);
+        var filename = Expression();
+        if (tok == ',') {
+          Skip(',');
+          var name = tok;
+          Next();
+        }
+        // TODO: Implement this.
+      } else if (tok == 'option') {
+        Skip(tok);
+        if (tok == 'explicit' || tok =='_explicit' ) {
+          Skip(tok);
+          option_explicit = true;
+        } else if (tok == 'base') {
+          Skip(tok);
+          if (tok == '0') {
+            option_base = 0;
+          } else if (tok == '1') {
+            option_base = 1;
+          } else {
+            Throw('Unexpected option base "' + tok + '"');
+          }
+          Next();
+        } else {
+          Throw('Unexpected option "' + tok + '"');
+        }
+      } else if (tok=='defdbl'||tok=='defsng'||tok=='deflng'||tok=='defint'||tok=='defstr') {
+        var def_type = tok;
+        Next();
+        for (;;) {
+          var start = tok;
+          var end;
+          Next();
+          if (EndOfStatement()||tok==',') {end=start;}
+          else {Skip('-');end=tok;Next();}
+          if (!start.match(/^[a-z]$/) ||
+              !end.match(/^[a-z]$/) ||
+              start.charCodeAt(0) > end.charCodeAt(0)) {
+            Throw('Invalid variable range');
+          }
+          var i = start;
+          do {
+            letter_default[i] = DEFAULT_TYPES[def_type];
+            i = NextChar(i);
+          } while (i <= end);
+          if (tok == ',') {
+            Skip(',');
+            continue;
+          }
+          break;
+        }
+      } else if (tok == 'for') {
+        Skip('for');
+        var name = tok;
+        var v = IndexVariable(name, true);
+        Next();
+        Skip('=');
+        var start = Expression();
+        Skip('to');
+        var end = Expression();
+        var step = 1;
+        if (tok == 'step') {
+          Skip('step');
+          step = Expression();
+        }
+        curop += v + ' = (' + start + ');';
+        NewOp();
+        curop += 'if (((' + step + ' > 0) && ' +
+                      v + ' > (' + end + ')) || ' +
+                     '((' + step + ' < 0) && ' +
+                      v + ' < (' + end + '))) { ip = ';
+        NewOp();
+        flow.push(['for', v, ops.length - 1, step]);
+      } else if (tok == 'next') {
+		  function AddOp() {
+            curop += f[1] + ' += (' + f[3] + ');\n';
+            curop += 'ip = ' + f[2] + ';\n';
+            NewOp();
+            ops[f[2]] += ops.length + '; }\n';
+		  }
+        Skip(tok);
+		  var yup=1;
+		  while (yup==1) {
+          var f = flow.pop();
+          if (f[0] != 'for') {
+            Throw('Expected NEXT');
+          }
+          if (!EndOfStatement()) {
+            var name = tok;
+            // TODO: Shouldn't this fail?
+            /*
+            if (name != f[1]) {
+              Throw('Expected ' + f[1]);
+            }
+            */
+            Next();
+          }
+          AddOp();
+     	    if (!EndOfStatement()) {
+			   Skip(',');
+			 }
+			 else {yup=0;}
+		  }
+      } else if (tok == 'paint') {
+        Skip('paint');
+        Skip('(');
+        var x = Expression();
+        Skip(',');
+        var y = Expression();
+        Skip(')');
+        var paint;
+        if (tok == ',') {
+          Skip(',');
+          paint = Expression();
+        }
+        var border;
+        if (tok == ',') {
+          Skip(',');
+          border = Expression();
+        }
+        curop += 'Paint((' + x + '), (' + y + '), (' +
+          paint + '), (' + border + '));\n';
+      } else if (tok == 'circle') {
+		  var s = tok;
+        Skip(tok);
+        Skip('(');
+        var x = Expression();
+        Skip(',');
+        var y = Expression();
+        Skip(')');
+        Skip(',');
+        var r = Expression();
+		  var c = 'undefined';
+        if (tok == ',') {
+          Skip(',');
+          if (tok != ',' && !EndOfStatement()) {
+            c = Expression();
+          }
+        }		  
+        var start = 0;
+        var end = Math.PI * 3;
+        var aspect = 'null';
+        var fill = 0;
+        if (tok == ',') {
+          Skip(',');
+          if (tok != ',' && !EndOfStatement()) {
+            start = Expression();
+          }
+        }
+        if (tok == ',') {
+          Skip(',');
+          if (tok != ',' && !EndOfStatement()) {
+            end = Expression();
+          }
+        }
+        if (tok == ',') {
+          Skip(',');
+          if (tok != ',' && !EndOfStatement()) {
+            aspect = Expression();
+          }
+        }
+        if (tok == ',') {
+          Skip(',');
+          if (tok=='f'||tok=='t') {
+            if (tok=='f') {fill=1} else {fill=2};
+            Next();
+          } else {
+            Throw('Expected F (fill) or T (thick), got ' + tok);
+          }
+        }
+        curop += 'Circle((' +
+          [x, y, r, c, start, end, aspect, fill].join('), (') + '));\n';
+      } else if (tok=='pset'||tok=='plot'||tok=='preset'||tok=='unplot') {
+		  var c=-1;
+        var x1 = 'pen_x';
+        var y1 = 'pen_y';
+		  if (tok=='pset'||tok=='plot') {c=-2;}
+        Next();
+		  var do_step=0;
+		  if (tok=='step') {
+		    do_step=1;
+			 Skip(tok);
+		  }
+        Skip('(');
+        var x=Expression();
+        Skip(',');
+        var y=Expression();
+        Skip(')');
+		  if (do_step==1) {
+		    x = x1+'+'+x;
+			 y = y1+'+'+y;
+		  }
+        if (tok==',') {
+          Skip(',');
+          c=Expression();
+        }
+        curop+='Pset('+x+','+y+','+c+');\n';
+      } else if (tok == 'line') {
+        Skip('line');
+        if (tok == 'input') {
+          Skip('input');
+          if (tok == ';') {
+            Skip(';');
+          }
+          var prompt = '""';
+          if (tok.substr(0, 1) == '"') {
+            var prompt = tok;
+            Next();
+            if (tok == ';' || tok == ',') {
+              Next();
+            }
+          }
+          curop += 'Print([' + prompt + ', ";"],"p", null);\n';
+          curop += 'PutCh(String.fromCharCode(219));\n';
+          curop += 'input_string = ""\n';
+          NewOp();
+          curop += 'LineInput();\n';
+          NewOp();
+          var a = GetVar();
+          curop += a + ' = input_string;\n';
+          return;
+        }
+        var x1 = 'pen_x';
+        var y1 = 'pen_y';
+        if (tok == '(') {
+          Skip('(');
+          x1 = Expression();
+          Skip(',');
+          y1 = Expression();
+          Skip(')');
+        }
+        if (tok=='to') {Skip(tok)}
+        else {Skip('-')}
+		  var do_step=0;
+		  if (tok=='step') {
+		    do_step=1;
+			 Skip(tok);
+		  }
+        Skip('(');
+        var x2=Expression();
+        Skip(',');
+        var y2=Expression();
+        Skip(')');
+		  if (do_step==1) {
+		    x2 = x1+'+'+x2;
+			 y2 = y1+'+'+y2;
+		  }
+        var c='undefined';
+        var fill=0;
+        if (tok==',') {
+          Skip(',');
+          if (tok!=',') {
+            c=Expression();
+          }
+          if (tok==',') {
+            Skip(',');
+            if (tok=='b') {
+              fill=1;
+            } else if (tok == 'bf') {
+              fill = 2;
+            } else {
+              Throw('Unexpected ' + tok);
+            }
+            Next();
+          }
+        }
+        curop += 'Line2((' +
+          [x1, y1, x2, y2, c, fill].join('), (') + '));\n';
+      } else if (tok == 'get') {
+        Skip('get');
+        Skip('(');
+        var x1 = Expression();
+        Skip(',');
+        var y1 = Expression();
+        Skip(')');
+        Skip('-');
+        Skip('(');
+        var x2 = Expression();
+        Skip(',');
+        var y2 = Expression();
+        Skip(')');
+        Skip(',');
+        var name = tok;
+        Next();
+        var v = ArrayPart(ReserveArrayCell(name).offset, 0);
+        curop += 'GetImage(' + x1 + ', ' + y1 + ', ' +
+          x2 + ', ' + y2 + ', buffer, ' + v + ');\n';
+      } else if (tok == 'put') {
+        Skip('put');
+        Skip('(');
+        var x = Expression();
+        Skip(',');
+        var y = Expression();
+        Skip(')');
+        Skip(',');
+        var name = tok;
+        Next();
+        var v = ArrayPart(ReserveArrayCell(name).offset, 0);
+        var mode = 'xor';
+        if (tok == ',') {
+          Skip(',');
+          if (tok == 'pset' || tok == 'preset' || tok == 'and' ||
+              tok == 'or' || tok == 'xor') {
+            mode = tok;
+            Next();
+          } else {
+            Throw('Invalid put mode');
+          }
+        }
+        curop += 'PutImage(' + x + ', ' + y + ', buffer, ' +
+          v + ', "' + mode + '");\n';
+      } else if (tok == 'screen') {
+        Skip(tok);
+        var ret = 'Screen(';
+		  if (tok == '_newimage') {
+		  	   Skip(tok);
+				Skip('(');
+				var m0 = Expression();
+				Skip(',');
+				var m1 = Expression();
+				Skip(',');
+				var e = Expression();
+				Skip(')');
+		  } else {
+            var e = Expression();
+				var m0;
+				var m1;
+		  }
+        ret += '' + e + ', ' + m0 + ', ' + m1 + '';
+        while (tok == ',') {
+          Skip(',');
+          if (tok != ',' && !EndOfStatement()) {
+            var e = Expression();
+            ret += ', (' + e + ')';
+          } else {
+            ret += ', null';
+          }
+        }
+        ret += ');\n'
+        curop += ret;
+      } else if (tok=='cls') {
+        Skip('cls');
+        var mode='0';
+        if (tok=='0'||tok=='1'||tok=='2') {
+          mode = tok;
+          Next();
+        }
+        curop+='Cls('+mode+');\n';
+      } else if (tok=='sleep'||tok=='_delay') {
+        Skip(tok);
+        if (EndOfStatement()) {curop+='SleepUntilKey=1;\n';}
+        else {var e=Expression();curop+='if ('+e+'==0) {SleepUntilKey=1;} else {Sleep('+e+');}\n';}
+        NewOp();
+      } else if (tok == 'pcopy') {
+        Skip(tok);
+        var x1; var y1; var x2; var y2;
+        if (tok=='(') {
+          Skip('(');x1=Expression();Skip(',');y1=Expression();Skip(')');
+          Skip('-');
+          Skip('(');x2=Expression();Skip(',');y2=Expression();Skip(')');
+          Skip(',');
+        }
+        var a = Expression();
+        Skip(',');
+        var b = Expression();
+        curop += 'Pcopy('+x1+','+y1+','+x2+','+y2+','+a+','+b+');\n';
+        NewOp();
+      } else if (tok=='scroll') {
+        Skip(tok);
+        var x1; var y1; var x2; var y2;
+        if (tok=='(') {
+          Skip('(');x1=Expression();Skip(',');y1=Expression();Skip(')');
+          Skip('-');
+          Skip('(');x2=Expression();Skip(',');y2=Expression();Skip(')');
+          Skip(',');
+        }
+        var h=Expression();Skip(',');var v=Expression();
+        var w = 0;
+        if (tok==',') {Skip(',');w=Expression();}
+        curop+='Scroll('+x1+','+y1+','+x2+','+y2+','+h+','+v+','+w+');\n';
+        NewOp();
+      } else if (tok=='_limit') {
+        Skip(tok);
+        var e=Expression();
+      } else if (tok=='_title') {
+        Skip(tok);
+        var e=Expression();
+        curop+='document.title='+e+';\n';
+        NewOp();
+      } else if (tok=='_autodisplay') {
+        Skip(tok);
+		  curop+='autodisplay = 1;\n';
+		  NewOp();
+		  curop+='display_now = 0;\n';
+		  NewOp();
+      } else if (tok=='_display') {
+        Skip(tok);
+		    curop+='autodisplay = 0;\n';
+		    NewOp();
+		    curop+='display_now = 1;\n';
+		    NewOp();
+      }  else if (tok=='_alert') {
+        Skip(tok);
+		  Skip('(');
+        var e=Expression();
+		  Skip(')');
+		  curop+='Sleep(0.005);\n';
+		  NewOp();
+        curop+='alert('+e+');\n';
+        NewOp();
+        curop+='mouse_buttons=0;\n';
+        NewOp();
+        curop+='KeyClear();\n';
+        NewOp();
+        curop+='canvas.focus();\n';
+        NewOp();
+      } else if (tok=='_consolelog') {
+        Skip(tok);
+		  Skip('(');
+        var e=Expression();
+		  Skip(')');
+		  curop+='Sleep(0.005);\n';
+		  NewOp();
+        curop+='console.log('+e+');\n';
+        NewOp();
+      } else if (tok=='_openwindow') {
+        Skip(tok);
+		  Skip('(');
+        var e=Expression();
+		  Skip(')');
+		  curop+='Sleep(0.005);\n';
+		  NewOp();
+        curop+='OpenWindow('+e+');\n';
+        NewOp();
+      } else if (tok=='locate') {
+        Skip(tok);
+		  var y='0';
+		  var x='0';
+		  if (tok!=',' && !EndOfStatement()) {
+            y=Expression();
+		  }
+		  if (tok == ',') {
+		      Skip(',');
+				x = Expression();
+		  }
+        if (tok == ',') {
+          Skip(',');
+          var cursor = Expression();
+          // TODO: Support cursor + start + stop
+        }
+        curop += 'Locate(' + x + ', ' + y + ');\n';
+      } else if (tok == 'width') {
+        Skip(tok);
+        var w = Expression();
+        if (tok == ',') {
+          Skip(',');
+          var n = Expression();
+          // TODO
+        }
+        curop += 'Width(' + w + ');curr_width='+w+'*8;window.dispatchEvent(new Event("resize"));\n';
+      } else if (tok == 'height') {
+        Skip(tok);
+        var w = Expression();
+        if (tok == ',') {
+          Skip(',');
+          var n = Expression();
+          // TODO
+        }
+        curop += 'Height(' + w + ');curr_height='+w+'*font_height;window.dispatchEvent(new Event("resize"));\n';
+      } else if (tok == 'color') {
+        Skip('color');
+        var fg;
+        var bg;
+        if (tok != ',') fg = Expression();
+        if (tok == ',') {
+          Skip(',');
+          bg = Expression();
+        }
+        if (tok == ',') {
+          Skip(',');
+          var cursor = Expression();
+          // TODO: Support cursor
+        }
+        curop += 'Color(' + fg + ',' + bg + ');\n';
+      } else if (tok == 'palette') {
+        Skip(tok);
+        if (!EndOfStatement()) {
+            var c = Expression();
+            Skip(',');
+            var p = Expression();
+            curop += 'Palette(' + c + ',' + p + ');\n';
+        }
+        else { curop += 'InitPalette();\n';
+        }
+      } else if (tok == 'swap') {
+        Skip(tok);
+        var a = GetVar();
+        Skip(',');
+        var b = GetVar();
+        curop += 'var t = ' + a + ';\n';
+        curop += a + ' = ' + b + ';\n';
+        curop += b + ' = t' + ';\n';
+      } else if (tok == 'mid$') {
+        Skip(tok);
+        Skip('(');
+        var a = GetVar();
+        Skip(',');
+        var b = Expression();
+		  var c = "0";
+		  if (tok == ",") {
+          Skip(',');
+          c = Expression();
+		  }
+        Skip(')');
+        Skip('=');
+        var d = Expression();
+		  var thisop = '(' + a + ').substr( 0, (' + b + ') -1)';
+		  var tempop = '(' + thisop +').concat( "", (' + d + ')';
+		  if (c !== "0") {
+		    tempop = tempop + '.substr(0,' + c + ')';
+		  }
+		  thisop = tempop + ')';
+		  thisop = '(' + thisop + ').substr(0, (' + a + ').length)';
+		  thisop = '(' + thisop + ').concat( "", (' + a + ').slice((' + thisop + ').length))';
+        curop += a + ' = ' + thisop + ';\n';
+      } else if (tok == 'data') {
+        ConsumeData();
+      } else if (tok == 'read') {
+        Skip('read');
+        curop += 'if(data[data_pos]==undefined) {Throw("OUT OF DATA");}\n';
+        curop += GetVar() + ' = data[data_pos++];\n';
+        while (tok == ',') {
+          Skip(',');
+          curop += GetVar() + ' = data[data_pos++];\n';
+        }
+      } else if (tok == 'restore') {
+        Skip('restore');
+        if (!EndOfStatement()) {
+          var name = tok;
+          if (tok=='eval') {Skip(tok);Skip('(');name=Expression();Skip(')');curop += 'data_pos = data_labels[((' + name + '.toString()).toLowerCase()).replace(/^0+/, "")];\n';}
+          else {curop += 'data_pos = data_labels[("' + name + '").replace(/^0+/, "")];\n';Next();}
+        } else {
+          curop += 'data_pos = 0;\n';
+        }
+      } else if (tok == 'input') {
+        Skip('input');
+        if (tok[0] == '#') {
+          // TODO: Implement.
+          Next();
+          if (tok == ';' || tok == ',') {
+            Next();
+          }
+        }
+        if (tok == ';') {
+          Skip(';');
+        }
+        var prompt = '"? "';
+        if (tok.substr(0, 1) == '"') {
+          var prompt = tok;
+          Next();
+          if (tok == ';' || tok == ',') {
+            Next();
+          }
+        }
+        curop += 'Print([' + prompt + ', ";"],"p",null);\n';
+        curop += 'PutCh(String.fromCharCode(219));\n';
+        curop += 'input_string = ""\n';
+        NewOp();
+        curop += 'LineInput();\n';
+        NewOp();
+        var n = 0;
+        while (!EndOfStatement()) {
+          curop += GetVar() + ' = input_string.split(",")[' + n++ + '];\n';
+          if (tok != ',') {
+            break;
+          }
+          Skip(',');
+        }
+      } else if (tok=='print'||tok=='?'||tok=='write'||tok.substring(0,6)=='print#'||tok.substring(0,6)=='write#') {
+        var sttmnt=tok.substring(0,1);
+        var fnum = null;
+		  if (tok.substring(0,6)=='print#') {
+  		    tok = tok.replace('print#','');
+			 fnum = Expression();
+		  }
+		  else if (tok.substring(0,6)=='write#') {
+  		    tok = tok.replace('write#','');
+			 fnum = Expression();
+		  }
+		  else {
+          Skip(tok);
+		    if (tok.charAt(0)=='#') {
+  		      tok = tok.replace('#','');
+			   fnum = Expression();
+		    }
+		  }
+        if (EndOfStatement()) {
+		    if (fnum !== null) {
+            curop += 'fPrint('+ fnum + ',"","p");\n';
+		    }
+			 else {
+            curop += 'Print([],"p",null);\n';
+			 }
+          return;
+        }
+        if (fnum !== null) {
+		    Skip(',');
+		  }
+        var fmt = null;
+        if (tok == 'using') {
+          Skip('using');
+          fmt = Expression();
+          Skip(';');
+        }
+        var items = [];
+        var e = Expression();
+        items.push(e);
+        while (tok == ';' || tok == ',') {
+		    if (fnum==null) {
+          items.push('"' + tok + '"');
+			 }
+			 else {
+			   if (sttmnt=='w') {items.push('","');}
+			   else {items.push('"' + tok + '"');}
+			 }
+          Next();
+			 if (tok == 'else') {
+			   break;
+			 } // cjv
+          if (EndOfStatement()) {
+            break;
+          }
+          var e = Expression();
+          items.push(e);
+        }
+        if (fnum !== null) {
+//		    curop += 'fPrint(' + fnum + ',' + items.join(' + ') + ',"' + sttmnt + '");\n';
+          curop += 'Print([' + items.join(', ') + '],"' + sttmnt + '",' + fnum + ');\n';
+		  }
+        else if (fmt !== null) {
+          curop += 'PrintUsing(' + fmt + ', [' + items.join(', ') + ']);\n';
+        } else {
+          curop += 'Print([' + items.join(', ') + '],"' + sttmnt + '",' + fnum + ');\n';
+        }
+      } else if (tok == 'select') {
+        Skip('select');
+        Skip('case');
+        if (tok == 'as') {
+          Skip('as');
+          Skip('const');
+        }
+        var e = Expression();
+        NewOp();
+        flow.push(['select', e, ops.length - 1, [], [], null]);
+      } else if (tok == 'case') {
+        Skip('case');
+        var f = flow.pop();
+        if (f[0] != 'select') {
+          Throw('Case outside select');
+        }
+        NewOp();
+        f[4].push(ops.length - 1);
+        if (tok == 'else') {
+          Skip('else');
+          f[5] = ops.length;
+          flow.push(f);
+          return;
+        }
+        function Accept(t) {
+          if (tok == t) {
+            Next();
+            return true;
+          }
+          return false;
+        }
+        do {
+          var e = Expression();
+          if (tok == 'to') {
+            Skip('to');
+            var e1 = Expression();
+            f[3].push([e, e1, ops.length]);
+          } else {
+            f[3].push([e, e, ops.length]);
+          }
+        } while (Accept(','));
+        flow.push(f);
+      } else if (tok == 'getmouse') {
+        Skip('getmouse');
+        curop += 'Yield();';
+        NewOp();
+        curop += GetVar() + ' = mouse_x;\n';
+        Skip(',');
+        curop += GetVar() + ' = mouse_y;\n';
+        if (tok == ',') {
+          Skip(',');
+          if (tok != ',') {
+            curop += GetVar() + ' = mouse_wheel;\n';
+          }
+        }
+        if (tok == ',') {
+          Skip(',');
+          if (tok != ',') {
+            curop += GetVar() + ' = mouse_buttons;\n';
+          }
+        }
+        if (tok == ',') {
+          Skip(',');
+          curop += GetVar() + ' = mouse_clip;\n';
+        }
+      } else if (tok=='') {
+        return;
+      } else if (tok=='call' || (functions[tok] !== undefined &&
+                                   functions[tok].is_subroutine)) {
+        var name=tok;
+        Next();
+        if (name=='call') {
+          name=tok;
+          Next();
+          FunctionCall(name,{is_subroutine:true,is_call:true});
+        } else {
+          NoEekOnSkip=1;
+          FunctionCall(name,{is_subroutine: true});
+          NoEekOnSkip=0;
+        }
+      } else {
+        var name = tok;
+        Next();
+        if (tok == ':') {
+          Skip(':');
+          AddLabel(name);
+          Statement();
+          return;
+        }
+        if (constants_list.indexOf('C'+name+'C')>-1) {
+           Throw('The constant "'+name+'" already exists.');}
+        var vname = IndexVariable(name,true);
+        if (tok=='='||tok=='+='||tok=='-='||tok=='*='||tok=='/='||tok=='\\='||tok=='^='||tok=='&=') {
+          var op = tok;
+          Next();
+          var e=Expression();
+          if (op=='&=') {
+            op='+=';
+          } else if (op=='\\=') {
+            op='//=';
+          } else if (op=='^=') {
+            curop+=vname+'=Math.pow('+vname+', '+e+');\n';
+            return;
+          }
+          curop+=vname+' '+op+' ('+e+');\n';
+        } else {
+          Throw('Expected "=" or "x=" found "' + tok + '"\n\n(assuming assignment to a variable; could be a case of a misspelled keyword)');
+        }
+      }
+    }
+
+    function Compile() {
+      NewOp();
+      while (tok != '') {
+        for (;;) {
+          // Implement line numbers.
+          if (tok.match(/^[0-9]+$/)) {
+            AddLabel(tok);
+            Next();
+          }
+          Statement();
+          while (tok == ':') {
+            Next();
+            Statement();
+          }
+          if (tok == '') {
+            break;
+          }
+          SkipEndOfStatement();
+        }
+      }
+
+      // Check for matching flow control.
+      if (flow.length != 0) {
+        var f = flow.pop();
+        Throw('Unmatched ' + f[0]);
+      }
+
+      // Implicit End.
+      NewOp();
+      curop += 'End();';
+      NewOp();
+
+      // Align to 8.
+      Align(8);
+
+      // Allocate stack.
+      stack = Allocate(STACK_SIZE);
+      sp = stack;
+      bp = sp;
+
+      var total = '';
+      total += 'var buffer = new ArrayBuffer(' +
+          allocated + ' + ' + DYNAMIC_HEAP_SIZE + ');\n';
+      for (var i in SIMPLE_TYPE_INFO) {
+        var info = SIMPLE_TYPE_INFO[i];
+        if (i == 'string') {
+          total += 'var str = [];\n';
+        } else {
+          total += 'var ' + info.view +
+            ' = new ' + info.array + '(buffer);\n';
+        }
+      }
+      total += var_decls;
+      total += 'for (var j = 0; j < ops.length; ++j) {\n';
+      if (debugging_mode) {
+        total += '  console.info("L" + j + ":\\n" + ops[j]);\n';
+      }
+      total += '  ops[j] = eval("(function() {\\n" + ops[j] + "})\\n");\n';
+      total += '}\n';
+      if (debugging_mode) {
+        console.info(total);
+      }
+      eval(total);
+    }
+
+    var viewport_x, viewport_y;
+    var viewport_w, viewport_h;
+
+    function Resize() {
+      if (from_tag) {canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
+      canvas.width-=2;canvas.height-=2;
+      var raspect = canvas.width / canvas.height;
+      var aspect = display.width / (display.height * screen_aspect);
+      if (raspect > aspect) {
+        viewport_w = Math.floor(
+          display.width * canvas.height / (display.height * screen_aspect));
+        viewport_h = canvas.height;
+        viewport_x = Math.floor((canvas.width - viewport_w) / 2);
+        viewport_y = 0;
+      } else {
+        viewport_w = canvas.width;
+        viewport_h = Math.floor(
+          (display.height * screen_aspect) * canvas.width / display.width);
+        viewport_x = 0;
+        viewport_y = Math.floor((canvas.height - viewport_h) / 2);
+      }
+    }
+
+    function Render() {
+      if (!canvas) {
+        return;
+      }
+
+      var scale_ctx = scale_canvas.getContext('2d');
+      scale_ctx.fillStyle = '#000';
+      scale_ctx.fillRect(0, 0, scale_canvas.width, scale_canvas.height);
+      scale_ctx.putImageData(display, 0, 0);
+      var ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#aaaaaa'; // cjv
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.imageSmoothingQuality = 'high';
+		  ctx.imageSmoothingEnabled = true;
+		
+      ctx.drawImage(scale_canvas, viewport_x, viewport_y,
+        viewport_w, viewport_h);
+      requestAnimationFrame(Render);
+    }
+
+    function RegularKey(n) {
+      keys.push(String.fromCharCode(n));
+    }
+
+    function ExtendedKey(n) {
+      keys.push(String.fromCharCode(0) + String.fromCharCode(n));
+    }
+
+    function InitEvents() {
+      const SIMPLE_KEYMAP = {
+        // BACKSPACE, ENTER, ESCAPE
+        8: { regular: 8 }, 13: { regular: 13 }, 27: { regular: 27 },
+        // INS, DEL
+        45: { regular: 82 }, 46: { regular: 83 },
+        // LEFT, RIGHT
+        37: { extended: 75 }, 39: { extended: 77 },
+        // UP, DOWN
+        38: { extended: 72 }, 40: { extended: 80 },
+        // PGUP, PGDN
+        33: { extended: 73 }, 34: { extended: 81 },
+        // HOME, END
+        36: { extended: 71 }, 35: { extended: 79 },
+      };
+      if (!canvas) {
+        return;
+      }
+      Resize();
+      if (from_tag) {
+        window.addEventListener('resize', Resize, false);
+      }
+      window.addEventListener('keyup',function(e){
+        keyState[e.keyCode || e.which] = false;
+        keyPressed = 0;
+        },false);
+      window.addEventListener('keydown', function(e) {
+        keyPressed = e.keyCode || e.which;
+        keyState[keyPressed] = true;
+        if (SleepUntilKey==1) {SleepUntilKey=0;}
+        if (e.keyCode >= 112 && e.keyCode <= 123) {
+          // F1 - F10
+          if (e.altKey) {
+            ExtendedKey(e.keyCode - 112 + 104);
+          } else if (e.ctrlKey) {
+            ExtendedKey(e.keyCode - 112 + 94);
+          } else if (e.shiftKey) {
+            ExtendedKey(e.keyCode - 112 + 84);
+          } else {
+            ExtendedKey(e.keyCode - 112 + 59);
+          }
+        } else if (e.keyCode == 9) {
+          // TAB, Shift-TAB
+          if (e.shiftKey) {
+            RegularKey(15);
+          } else {
+            RegularKey(9);
+          }
+        } else if (SIMPLE_KEYMAP[e.keyCode]) {
+          if (SIMPLE_KEYMAP[e.keyCode].regular) {
+            RegularKey(SIMPLE_KEYMAP[e.keyCode].regular);
+          } else {
+            ExtendedKey(SIMPLE_KEYMAP[e.keyCode].extended);
+          }
+        } else if (e.ctrlKey && e.keyCode >= 65 && e.keyCode <= 90) {
+          // Ctrl-A to Ctrl-Z
+          RegularKey(e.keyCode - 65 + 1);
+        } else if (e.altKey) {
+          const ch = String.fromCharCode(e.keyCode);
+          const row1 = '1234567890-='.indexOf(ch);
+          const row2 = 'QWERTYUIOP'.indexOf(ch);
+          const row3 = 'ASDFGHJKL'.indexOf(ch);
+          const row4 = 'ZXCVBNM'.indexOf(ch);
+          if (row1 >= 0) {
+            ExtendedKey(row1 + 120);
+          } else if (row2 >= 0) {
+            ExtendedKey(row2 + 16);
+          } else if (row3 >= 0) {
+            ExtendedKey(row3 + 30);
+          } else if (row4 >= 0) {
+            ExtendedKey(row4 + 44);
+          }
+        } else {
+          const code = e.key.charCodeAt(0);
+          if (e.key.length == 1 && code >= 32 && code <= 126) {
+            RegularKey(code);
+          }
+        }
+      }, false);
+      canvas.addEventListener('mousemove', function(e) {
+        // TODO: Generalize for non-fullscreen.
+        //var rect = canvas.getBoundingClientRect();
+        var rect = {left: 0, top: 0};
+        mouse_x = Math.floor(
+          (e.clientX - rect.left - viewport_x) * display.width / viewport_w);
+        mouse_y = Math.floor(
+          (e.clientY - rect.top - viewport_y) * display.height / viewport_h);
+      }, false);
+      canvas.addEventListener('touchmove', function(e) {
+        var touch = e.touches.item(0);
+        const evt = new Event('mousemove');
+        evt.clientX = touch.clientX;
+        evt.clientY = touch.clientY;
+        canvas.dispatchEvent(evt);
+      }, false);
+      canvas.addEventListener('mousedown', function(e) {
+        if (SleepUntilKey==1) {SleepUntilKey=0;}
+        var e = e || window.event;
+        if (e.button == 0) {mouse_buttons = -1;}
+      }, false);
+      canvas.addEventListener('touchstart', function(e) {
+        canvas.dispatchEvent(new Event('mousedown'));
+      }, false);
+      canvas.addEventListener('mouseup', function(e) {
+        mouse_buttons = 0;
+      }, false);
+      canvas.addEventListener('mouseleave', function(e) {
+        mouse_buttons = 0;
+      }, false);
+      canvas.addEventListener('mouseover', function(e) {
+        mouse_buttons = e.buttons;
+      }, false);
+      canvas.addEventListener('touchend', function(e) {
+        canvas.dispatchEvent(new Event('mouseup'));
+      }, false)
+      // TODO: Implement Mouse Wheel!
+      canvas.addEventListener('wheel', function(e)
+      {
+       if (event.deltaY < 0) {mouse_wheel = mouse_wheel - 1;}
+       else if (event.deltaY > 0) {mouse_wheel = mouse_wheel + 1;}
+      });
+      // TODO: Implement Mouse Clip!
+    }
+
+    function Run() {
+      var speed=10000001-0;
+      for (;;) {
+        for (var i=0;i<speed;++i) {
+          if (SleepUntilKey==1) {}
+          else {ops[ip++]();}
+          if ((yielding && autodisplay) || display_now) {
+            yielding=0;
+            display_now=0;
+            if (quitting) {return;}
+            break;
+          }
+        }
+        if (canvas) {
+          setTimeout(Run,delay);
+          delay=0;
+          break;
+        }
+      }
+    }
+
+    var compiled_ok=false;
+    try {
+      Compile();
+      compiled_ok=true;
+    } catch (e) {
+      if (canvas) {
+        Locate(1, 1);
+        Color(15);
+        Print([e.toString(), ';']);
+      } else {
+        console.error(e.toString());
+      }
+      if (e.stack !== undefined) {
+        console.info(e.stack);
+      }
+    }
+    InitEvents();
+    Render();
+    if (compiled_ok) {
+      Run();
+    }
+  }
+
+  function SetupCanvas(tag, full_window) {
+    if (full_window) {
+      document.body.style.width = '100%';
+      document.body.style.height = '100%';
+      document.body.style.margin = '0';
+      document.body.style.border = '0';
+      document.body.style.overflow = 'hidden';
+      document.body.style.display = 'block';
+    }
+    var canvas=document.createElement('canvas');
+    canvas.style.border="1px solid black";
+    canvas.width=800;
+    canvas.height=600;
+    if (full_window) {
+      document.body.appendChild(canvas);
+    } else {
+      tag.insertAdjacentElement('beforebegin', canvas);
+    }
+    var context = canvas.getContext('2d');
+    context.fillStyle = 'black';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = 'white';
+    context.strokeStyle = 'white';
+    return canvas;
+  }
+
+  var timer_halted = 0;
+  var timer_offset = 0;
+
+  function GetTimer() {
+//    var t = new Date().getTime() / 1000;
+//    return t + timer_offset;
+var d = new Date(), e = new Date(d);
+return (e - d.setHours(0,0,0,0))/1000;
+  }
+
+  function Init() {
+    var tags = document.getElementsByTagName('script');
+    var count = 0;
+    for (var t = 0; t < tags.length; ++t) {
+      if (tags[t].type != 'text/basic') {
+        continue;
+      }
+      ++count;
+    }
+    var full_window = count == 1 && document.body.innerText == '';
+    for (var t = 0; t < tags.length; ++t) {
+      if (tags[t].type != 'text/basic') {
+        continue;
+      }
+      var tag = tags[t];
+      var canvas = SetupCanvas(tag, full_window);
+      if (tags[t].src) {
+        var request = new XMLHttpRequest();
+        request.addEventListener('load', function(e) {
+          Interpret(request.responseText, canvas, true);
+        }, false);
+        request.open('GET', tag.src);
+        request.send();
+      } else {
+        Interpret(tag.text, canvas, true);
+      }
+    }
+  }
+
+  function Main() {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('load', Init);
+      window.addEventListener('focusout', function() {
+        timer_halted = GetTimer();
+      });
+      window.addEventListener('focusin', function() {
+        timer_offset = timer_halted - (new Date().getTime() / 1000);
+      });
+      window.Basic = Interpret;
+    } else {
+      exports.Basic = function(code) {
+        Interpret(code, null);
+      };
+    }
+  }
+
+  Main();
+
+  var CHARSET =
+    '\u0020\u263a\u263b\u2665\u2666\u2663\u2660\u2022' +
+    '\u25d8\u25cb\u25d9\u2642\u2640\u266a\u266b\u263c' +
+    '\u25ba\u25c4\u2195\u203c\u00b6\u00a7\u25ac\u21a8' +
+    '\u2191\u2193\u2192\u2190\u221f\u2194\u25b2\u25bc' +
+    '\u0020\u0021\u0022\u0023\u0024\u0025\u0026\u0027' +
+    '\u0028\u0029\u002a\u002b\u002c\u002d\u002e\u002f' +
+    '\u0030\u0031\u0032\u0033\u0034\u0035\u0036\u0037' +
+    '\u0038\u0039\u003a\u003b\u003c\u003d\u003e\u003f' +
+    '\u0040\u0041\u0042\u0043\u0044\u0045\u0046\u0047' +
+    '\u0048\u0049\u004a\u004b\u004c\u004d\u004e\u004f' +
+    '\u0050\u0051\u0052\u0053\u0054\u0055\u0056\u0057' +
+    '\u0058\u0059\u005a\u005b\u005c\u005d\u005e\u005f' +
+    '\u0060\u0061\u0062\u0063\u0064\u0065\u0066\u0067' +
+    '\u0068\u0069\u006a\u006b\u006c\u006d\u006e\u006f' +
+    '\u0070\u0071\u0072\u0073\u0074\u0075\u0076\u0077' +
+    '\u0078\u0079\u007a\u007b\u007c\u007d\u007e\u2302' +
+    '\u00c7\u00fc\u00e9\u00e2\u00e4\u00e0\u00e5\u00e7' +
+    '\u00ea\u00eb\u00e8\u00ef\u00ee\u00ec\u00c4\u00c5' +
+    '\u00c9\u00e6\u00c6\u00f4\u00f6\u00f2\u00fb\u00f9' +
+    '\u00ff\u00d6\u00dc\u00a2\u00a3\u00a5\u20a7\u0192' +
+    '\u00e1\u00ed\u00f3\u00fa\u00f1\u00d1\u00aa\u00ba' +
+    '\u00bf\u2310\u00ac\u00bd\u00bc\u00a1\u00ab\u00bb' +
+    '\u2591\u2592\u2593\u2502\u2524\u2561\u2562\u2556' +
+    '\u2555\u2563\u2551\u2557\u255d\u255c\u255b\u2510' +
+    '\u2514\u2534\u252c\u251c\u2500\u253c\u255e\u255f' +
+    '\u255a\u2554\u2569\u2566\u2560\u2550\u256c\u2567' +
+    '\u2568\u2564\u2565\u2559\u2558\u2552\u2553\u256b' +
+    '\u256a\u2518\u250c\u2588\u0020\u258c\u2590\u2580' +
+    '\u03b1\u00df\u0393\u03c0\u03a3\u03c3\u00b5\u03c4' +
+    '\u03a6\u0398\u03a9\u03b4\u221e\u03c6\u03b5\u2229' +
+    '\u2261\u00b1\u2265\u2264\u2320\u2321\u00f7\u2248' +
+    '\u00b0\u2219\u00b7\u221a\u207f\u00b2\u25a0\u0020';
+
+  var FONT8 =
+    '                                                                '+
+' X    x   XXXXX   XXXXX   XX XX     X      XXX      X    X    X '+
+'         X     X XXXXXXX XXXXXXX   XXX     XXX     XXX          '+
+'         X X X X XX X XX XXXXXXX  XXXXX  XX X XX  XX XX         '+
+'         X     X XXXXXXX XXXXXXX XXXXXXX XXX XXX XX X XX        '+
+'         X XXX X XX   XX  XXXXX   XXXXX  XX X XX X XXX X        '+
+'         X     X XXXXXXX   XXX     XXX      X       X           '+
+' X    x   XXXXX   XXXXX     X       X      XXX     XXX   X    X '+
+
+'XXXXXXXX        XXXXXXXX                                        '+
+'XXX  XXX   XX   XXX  XXX     XXX  XXXX      X      XXXXX    X   '+
+'XX    XX  X  X  XX XX XX      XX XX  XX     XXX    X   X  X X X '+
+'X      X X    X X XXXX X  XXXX X XX  XX     X  X   XXXXX   X X  '+
+'X      X X    X X XXXX X XX  XX   XXXX      X X    X   X XX   XX'+
+'XX    XX  X  X  Xx XX XX XX  XX    XX    XXXX    XXX XXX   X X  '+
+'XXX  XXX   XX   XXX  XXX  XXXX   XXXXXX XXXXX    XXX XXX  X X X '+
+'XXXXXXXX        XXXXXXXX           XX    XXXX    XXX XXX    X   '+
+
+'                                                                '+
+' X             X    X     XX XX  XXXXXX   XXXX              X   '+
+' XXX         XXX   XXX    XX XX  XXX XX  XX                XXX  '+
+' XXXXX     XXXXX  XXXXX   XX XX  XXX XX   XXXX            XXXXX '+
+' XXXXXXX XXXXXXX    X     XX XX   XX XX  XX  XX             X   '+
+' XXXXX     XXXXX  XXXXX           XX XX   XXXX  XXXXXXXX  XXXXX '+
+' XXX         XXX   XXX    XX XX   XX XX      XX XXXXXXXX   XXX  '+
+' X             X    X                     XXXX            XXXXX '+
+
+'                                                                '+
+'    X       X                    X                  X    XXXXXXX'+
+'   XXX      X        X     X     X         X X      X     XXXXX '+
+'  XXXXX     X        XX   XX     X        XX XX    XXX    XXXXX '+
+'    X       X    XXXXXXX XXXXXXX X       XXXXXXX   XXX     XXX  '+
+'    X     XXXXX      XX   XX     X        XX XX   XXXXX    XXX  '+
+'    X      XXX       X     X     XXXXXXX   X X    XXXXX     X   '+
+'    X       X                                    XXXXXXX    X   '+
+
+'                                                                '+
+'           XX    XX XX    XX XX    XX             XXXX     XX   '+
+'           XX    XX XX   XXXXXXX  XXXX   XX  XX  XX  XX    XX   '+
+'           XX             XX XX  XX      XX XX   XXX            '+
+'           XX             XX XX   XXXX     XX     XXX X         '+
+'                         XXXXXXX     XX   XX XX  XX XX          '+
+'           XX             XX XX   XXXX   XX  XX  XX  XX         '+
+'                                   XX             XXX X         '+
+
+'                                                                '+
+'    XX    XX                                                    '+
+'   XX      XX     XX XX    XX                                XX '+
+'  XX        XX     XXX     XX                               XX  '+
+'  XX        XX   XXXXXXX XXXXXX          XXXXXX            XX   '+
+'  XX        XX     XXX     XX      XX              XX     XX    '+
+'   XX      XX     XX XX    XX      XX              XX    XX     '+
+'    XX    XX                      XX                            '+
+
+'                                                                '+
+'  XXXX     XX     XXXX   XXXXX       XX  XXXXXX   XXXX   XXXXXX '+
+' XX  XX   XXX    XX  XX      XX  XX  XX  XX      XX      XX  XX '+
+' XX XXX  XXXX       XX    XXXX   XX  XX  XXXXX   XXXXX      XX  '+
+' XXX XX    XX      XX        XX  XXXXXX      XX  XX  XX    XX   '+
+' XX  XX    XX     XX         XX      XX  XX  XX  XX  XX    XX   '+
+'  XXXX   XXXXXX  XXXXXX  XXXXX       XX   XXXX    XXXX     XX   '+
+'                                                                '+
+
+'                                                                '+
+'  XXXX    XXXX                                            XXXX  '+
+' XX  XX  XX  XX    XX      XX       XXX         XXX      XX  XX '+
+'  XXXX   XX  XX    XX      XX     XXX    XXXXXX   XXX       XX  '+
+' XX  XX   XXXXX                 XXX                 XXX    XX   '+
+' XX  XX      XX    XX      XX     XXX    XXXXXX   XXX           '+
+'  XXXX    XXXX     XX      XX       XXX         XXX        XX   '+
+'                          XX                                    '+
+
+'                                                                '+
+'  XXXX     XX    XXXXX    XXXX   XXXX    XXXXXX  XXXXXX   XXXX  '+
+' XX  XX   XXXX   XX  XX  XX  XX  XX XX   XX      XX      XX  XX '+
+' XX X X  XX  XX  XXXXX   XX      XX  XX  XXXXX   XXXXX   XX     '+
+' XX XXX  XXXXXX  XX  XX  XX      XX  XX  XX      XX      XX XXX '+
+' XX      XX  XX  XX  XX  XX  XX  XX XX   XX      XX      XX  XX '+
+'  XXXX   XX  XX  XXXXX    XXXX   XXXX    XXXXXX  XX       XXXXX '+
+'                                                                '+
+
+'                                                                '+
+' XX  XX  XXXXXX    XXXXX XX  XX  XX      XX   XX XX  XX   XXXX  '+
+' XX  XX    XX        XX  XX XX   XX      XXX XXX XXX XX  XX  XX '+
+' XXXXXX    XX        XX  XXXX    XX      XXXXXXX XXXXXX  XX  XX '+
+' XX  XX    XX    XX  XX  XX XX   XX      XX X XX XX XXX  XX  XX '+
+' XX  XX    XX    XX  XX  XX  XX  XX      XX   XX XX  XX  XX  XX '+
+' XX  XX  XXXXXX   XXXX   XX  XX  XXXXXX  XX   XX XX  XX   XXXX  '+
+'                                                                '+
+
+'                                                                '+
+' XXXXX    XXXX   XXXXX   XXXXX   XXXXXX  XX  XX  XX  XX  XX   XX'+
+' XX  XX  XX  XX  XX  XX XX   XX    XX    XX  XX  XX  XX  XX   XX'+
+' XX  XX  XX  XX  XX  XX  XXX       XX    XX  XX  XX  XX  XX X XX'+
+' XXXXX   XX  XX  XXXXX     XXX     XX    XX  XX  XX  XX  XXXXXXX'+
+' XX      XX X X  XX XX  XX   XX    XX    XX  XX   XXXX   XXX XXX'+
+' XX       XXXX   XX  XX  XXXXX     XX     XXXX     XX    XX   XX'+
+'             XX                                                 '+
+
+'                                                                '+
+' XX   XX XX  XX  XXXXXX   XXXX            XXXX     XX           '+
+'  XX XX  XX  XX     XX    XX     XX         XX    XXXX          '+
+'   XXX    XXXX     XX     XX      XX        XX   XX  XX         '+
+'   XXX     XX     XX      XX       XX       XX                  '+
+'  XX XX    XX    XX       XX        XX      XX                  '+
+' XX   XX   XX    XXXXXX   XX         XX     XX                  '+
+'                          XXXX            XXXX           XXXXXXX'+
+
+'  XX                                                            '+
+'   XX            XX                  XX            XXXX         '+
+'          XXXX   XX       XXXX       XX   XXXX    XX      XXX XX'+
+'             XX  XXXXX   XX  XX   XXXXX  XX  XX  XXXXX   XX  XX '+
+'          XXXXX  XX  XX  XX      XX  XX  XXXXXX   XX     XX  XX '+
+'         XX  XX  XX  XX  XX  XX  XX  XX  XX       XX      XXXXX '+
+'          XXXXX  XXXXX    XXXX    XXXXX   XXXX    XX         XX '+
+'                                                          XXXX  '+
+
+'                                                                '+
+' XX        XX        XX  XX      XXXX                           '+
+' XX                      XX        XX     XX XX  X XXX    XXXX  '+
+' XXXXX    XXX       XXX  XX XX     XX    XX X XX XX  XX  XX  XX '+
+' XX  XX    XX        XX  XXXX      XX    XX X XX XX  XX  XX  XX '+
+' XX  XX    XX        XX  XX XX     XX    XX   XX XX  XX  XX  XX '+
+' XX  XX  XXXXXX  XX  XX  XX  XX    XXXX  XX   XX XX  XX   XXXX  '+
+'                  XXXX                                          '+
+
+'                                                                '+
+'                                  XX                            '+
+' XXXXX    XXXXX  X XXX    XXXX   XXXXX   XX  XX  XX  XX  XX   XX'+
+' XX  XX  XX  XX  XX  XX  XX       XX     XX  XX  XX  XX  XX   XX'+
+' XX  XX  XX  XX  XX       XXXX    XX     XX  XX  XX  XX  XX X XX'+
+' XXXXX    XXXXX  XX          XX   XX XX  XX  XX   XXXX   XX X XX'+
+' XX          XX  XX       XXXX     XXX    XXX X    XX     XX XX '+
+' XX          XX                                                 '+
+
+'                                                                '+
+'                            XXX    XX    XXX                X   '+
+' XX  XX  XX  XX  XXXXXX    XX      XX      XX              XXX  '+
+'  XXXX   XX  XX     XX     XX      XX      XX     XXX XX  XX XX '+
+'   XX    XX  XX    XX    XXX       XX       XXX  XX XXX  XX   XX'+
+'  XXXX    XXXXX   XX       XX      XX      XX            XX   XX'+
+' XX  XX      XX  XXXXXX    XX      XX      XX            XXXXXXX'+
+'          XXXX              XXX    XX    XXX                    '+
+
+'                    XX      X    XX  XX    XX      XXX          '+
+'  XXXXXX XX  XX    XX      X X              XX     X X          '+
+' XX               XXXX    XXXX    XXXX    XXXX    XXXX    XXXXX '+
+' XX      XX  XX  XX  XX      XX      XX      XX      XX  XX     '+
+' XX      XX  XX  XXXXXX   XXXXX   XXXXX   XXXXX   XXXXX  XX     '+
+'  XXXXXX XX  XX  XX      XX  XX  XX  XX  XX  XX  XX  XX   XXXXX '+
+'    X     XXX X   XXXX    XXXXX   XXXXX   XXXXX   XXXXX     X   '+
+'   XX                                                      XX   '+
+
+'    X    XX  XX   XX               X     XX      XX  XX    XXX  '+
+'   X X             XX    XX  XX   X X     XX               X X  '+
+'  XXXX    XXXX    XXXX                            XXXX    XXXX  '+
+' XX  XX  XX  XX  XX  XX   XXX     XXX     XXX    XX  XX  XX  XX '+
+' XXXXXX  XXXXXX  XXXXXX    XX      XX      XX    XXXXXX  XXXXXX '+
+' XX      XX      XX        XX      XX      XX    XX  XX  XX  XX '+
+'  XXXX    XXXX    XXXX   XXXXXX  XXXXXX  XXXXXX  XX  XX  XX  XX '+
+'                                                                '+
+
+'    XX                      X             XX        X     XX    '+
+'   XX              XXXXX   X X   XX  XX    XX      X X     XX   '+
+' XXXXXX   XX XX   X XX                                          '+
+' XX         X  X X  XXXX  XXXX    XXXX    XXXX   XX  XX  XX  XX '+
+' XXXXX    XXXXXX XXXXX   XX  XX  XX  XX  XX  XX  XX  XX  XX  XX '+
+' XX      X XX    X  XX   XX  XX  XX  XX  XX  XX  XX  XX  XX  XX '+
+' XXXXXX   XX XX  X  XXXX  XXXX    XXXX    XXXX    XXX X   XXX X '+
+'                                                                '+
+
+'          XX XX   XX XX                                         '+
+' XX  XX                            XXXXX XX   XX XXX         XXX'+
+'          XXXXX  XX   XX    X     XX   X  XX XX  X XX       XX  '+
+' XX  XX  XX   XX XX   XX  XXXXX  XXXXX     XXX   XXX      XXXXXX'+
+' XX  XX  XX   XX XX   XX XX X     XX      XXXXX  X XXX X   XX   '+
+'  XXXXX  XX   XX XX   XX XX X     XXX  X    X    X  X X   XX    '+
+'     XX   XXXXX   XXXXX   XXXXX  XXXXXXX  XXXXX  X  X  X XX     '+
+'  XXXX                      X               X    X  X X  X      '+
+
+'    XX      XX      XX      XX     X X      X X                 '+
+'   XX      XX      XX      XX     X X      X X      XXX     XXX '+
+'  XXXX                                   XX   XX      XX   XX XX'+
+'     XX   XXX     XXXX   XX  XX  X XXX   XXX  XX    XXXX   XX XX'+
+'  XXXXX    XX    XX  XX  XX  XX  XX  XX  XXXXXXX   XX XX   XX XX'+
+' XX  XX    XX    XX  XX  XX  XX  XX  XX  XX  XXX    XXXX    XXX '+
+'  XXXXX  XXXXXX   XXXX    XXX X  XX  XX  XX   XX                '+
+'                                                                '+
+
+'                                                                '+
+'   XX                    X       X         XX                   '+
+'                         X   X   X   X             XX XX XX XX  '+
+'   XX    XXXXXXX XXXXXXX X  X    X  X      XX     XX XX   XX XX '+
+'  XX     XX           XX X X XX  X X   X   XX    XX XX     XX XX'+
+' XX  XX  XX           XX  X    X  X  X X   XX     XX XX   XX XX '+
+'  XXXX                   X    X  X   XXX   XX      XX XX XX XX  '+
+'                             XXX       X                        '+
+ 'X   X    X X X X XXX XXX   X       X       X      X X           '+
+'  X   X X X X X XX XXX X   X       X       X      X X           '+
+'X   X    X X X X XXX XXX   X       X    XXXX      X X           '+
+'  X   X X X X X XX XXX X   X    XXXX       X    XXX X   XXXXX   '+
+'X   X    X X X X XXX XXX   X       X    XXXX      X X     X X   '+
+'  X   X X X X X XX XXX X   X       X       X      X X     X X   '+
+'X   X    X X X X XXX XXX   X       X       X      X X     X X   '+
+'  X   X X X X X XX XXX X   X       X       X      X X     X X   '+
+
+'          X X     X X             X X     X X      X            '+
+'          X X     X X             X X     X X      X            '+
+'XXXX    XXX X     X X   XXXXX   XXX X     X X   XXXX            '+
+'   X        X     X X       X       X   XXXXX      X    XXXX    '+
+'XXXX    XXX X     X X   XXX X   XXXXX           XXXX       X    '+
+'   X      X X     X X     X X                              X    '+
+'   X      X X     X X     X X                              X    '+
+'   X      X X     X X     X X                              X    '+
+
+'   X       X               X               X       X      X X   '+
+'   X       X               X               X       X      X X   '+
+'   X       X               X               X       XXXXX  X X   '+
+'   XXXXXXXXXXXXXXXXXXXXX   XXXXXXXXXXXXXXXXXXXXX   X      X XXXX'+
+'                   X       X               X       XXXXX  X X   '+
+'                   X       X               X       X      X X   '+
+'                   X       X               X       X      X X   '+
+'                   X       X               X       X      X X   '+
+
+'  X X             X X             X X             X X      X    '+
+'  X X             X X             X X             X X      X    '+
+'  X XXXX  XXXXXXXXX XXXXXXXXXXXX  X XXXXXXXXXXXXXXX XXXXXXXXXXXX'+
+'  X       X                       X                             '+
+'  XXXXXX  X XXXXXXXXXXXXXXX XXXX  X XXXXXXXXXXXXXXX XXXXXXXXXXXX'+
+'          X X             X X     X X             X X           '+
+'          X X             X X     X X             X X           '+
+'          X X             X X     X X             X X           '+
+
+'  X X                     X X      X                      X X   '+
+'  X X                     X X      X                      X X   '+
+'  X X   XXXXXXXX          X X      XXXXX   XXXXX          X X   '+
+'XXXXXXXX        XXXXXXXX  XXXXXX   X       X      XXXXXXXXXXXXXX'+
+'        XXXXXXXX  X X              XXXXX   XXXXX  X X     X X   '+
+'           X      X X                      X      X X     X X   '+
+'           X      X X                      X      X X     X X   '+
+'           X      X X                      X      X X     X X   '+
+
+'   X       X            XXXXXXXX        XXXX        XXXXXXXXXXXX'+
+'   X       X            XXXXXXXX        XXXX        XXXXXXXXXXXX'+
+'XXXXXXXX   X            XXXXXXXX        XXXX        XXXXXXXXXXXX'+
+'        XXXX       XXXXXXXXXXXXX        XXXX        XXXXXXXXXXXX'+
+'XXXXXXXX           X    XXXXXXXXXXXXXXXXXXXX        XXXX        '+
+'   X               X    XXXXXXXXXXXXXXXXXXXX        XXXX        '+
+'   X               X    XXXXXXXXXXXXXXXXXXXX        XXXX        '+
+'   X               X    XXXXXXXXXXXXXXXXXXXX        XXXX        '+
+
+'          XXX    XXXXXX          XXXXXX                         '+
+' XX   X  X   X   X               X                              '+
+'X  X X   X  X    X                X                             '+
+'X   X    XXXXX   X       XXXXXX    X     XXXXXX                 '+
+'X  X X   X    X  X        X  X    X     X    X                  '+
+' XX   X  X    X  X        X  X   X      X    X                  '+
+'        X XXXX   X        X  X   XXXXXX  XXXX                   '+
+'                                                                '+
+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX '+
+'                                                                '+
+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX '+
+'                                                                '+
+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXX XXX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XX   XX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXX XXX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XX   XX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXX XXX XXXXXXX XXXXXXX '+
+'XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX '+
+'                                                                '+
+'';
+})();
+
+</script>
+    <script type="text/basic">
+	 	screen 0 : print "mouse click here to set mouse and keyboard focus"
+	 	while _mousebutton = 0 and not true : wend
+	 	while _mousebutton and not :::autostart::: : wend
+		function input$(n) : a$ = "" : while len(a$) < n : b$ = inkey$ : if b$ <> "" then : a$ = a$ + b$ : end if : wend : input$ = a$ : end function
+	 	cls : screen 12
+      ' This program exported from BASIC Anywhere Machine (Version [5.2.3].[2023.12.16.16.28]) on 2024.03.26 at 03:10 (Coordinated Universal Time)
+CLS
+
+FUNCTION ODD(X): ODD=(X/2<>INT(X/2)): END FUNCTION
+
+'Red=12, Yellow=14, Green=10, Blue = 9, Pink=13, Purple=5; see: https://basicanywheremachine.neocities.org/bam-progreference - p16 colours
+DATA "Albany","ALB","M1",12,0,0
+DATA "Atlanta","ATL","I12",14,0,0
+DATA "Baltimore","BAL","M6",10,1,0
+DATA "Birmingham","BIR","F12",9,0,0
+DATA "Boston","BOS","O1",15,1,3
+DATA "Buffalo","BUF","J1",13,1,0
+DATA "Burlington","BUR","B5",12,0,0
+DATA "Charleston","CHS","L12",15,0,3
+DATA "Chattanooga","CHA","H11",15,0,2
+DATA "Chicago","CHI","C4",14,1,0
+DATA "Cincinnatti","CIN","F7",10,1,0
+DATA "Cleveland","CLE","H4",9,0,0
+DATA "Cumberland","CMB","K6",13,0,0
+DATA "Detroit","DET","F2",12,0,0
+DATA "Dover","DOV","O7",15,0,3
+DATA "Kansas City","KAN","A7",15,0,1
+DATA "Knoxville","KNO","I9",14,0,0
+DATA "Little Rock","LIT","A11",15,0,1
+DATA "Louisville","LOU","E9",10,0,0
+DATA "Memphis","MEM","C11",9,0,0
+DATA "Milwaukee","MIL","B2",13,0,0
+DATA "Minneapolis","MIN","A1",15,0,1
+DATA "Nashville","NAS","F10",12,0,0
+DATA "New York","NYC","O3",14,1,0
+DATA "Philadelphia","PHI","M4",10,1,0
+DATA "Pittsburgh","PIT","J4",9,0,0
+DATA "Richmond","RIC","M8",13,0,0
+DATA "St. Louis","STL","B8",12,1,0
+DATA "Toledo","TOL","F4",15,0,2
+DATA "Wheeling","WHE","I6",15,0,2
+DATA "Wilmington","WIL","N11",14,0,0
+
+'Lake Michigan
+DATA "D1", "W"
+DATA "C2", "W"
+DATA "D2", "W"
+DATA "D3", "W"
+
+'Lake Ontario
+DATA "H2", "W"
+DATA "I2", "W"
+
+'Lake Erie
+DATA "G3", "W"
+DATA "H3", "W"
+
+'Seaboard
+DATA "O2", "W"
+DATA "O4", "W"
+DATA "O5", "W"
+DATA "O6", "W"
+DATA "N7", "W"
+DATA "N8", "W"
+DATA "O8", "W"
+DATA "O9", "W"
+DATA "O10", "W"
+DATA "O11", "W"
+DATA "M12", "W"
+DATA "N12", "W"
+DATA "O12", "W"
+
+'Appalachians
+DATA "J2", "M"
+DATA "K2", "M"
+DATA "L2", "M"
+DATA "K3", "M"
+DATA "L3", "M"
+DATA "M3", "M"
+DATA "K4", "M"
+DATA "J5", "M"
+DATA "K5", "M"
+DATA "L5", "M"
+DATA "J6", "M"
+DATA "I7", "M"
+DATA "J7", "M"
+DATA "K7", "M"
+DATA "H8", "M"
+DATA "I8", "M"
+DATA "J8", "M"
+DATA "H9", "M"
+DATA "J9", "M"
+DATA "K9", "M"
+DATA "G10", "M"
+DATA "I10", "M"
+DATA "F11", "M"
+DATA "G11", "M"
+DATA "I11", "M"
+
+DATA "ZZ"
+
+'on odds, E; on evens, W, NE, SE, NW, SW
+
+'Misssippi River
+DATA "A1", "E"
+DATA "A2", "W"
+DATA "A3", "E"
+DATA "B4", "W"
+DATA "B5", "E"
+DATA "B6", "W"
+DATA "B7", "E"
+DATA "C8", "W"
+DATA "C9", "E"
+DATA "C10", "W"
+DATA "B11", "E"
+DATA "B12", "W"
+
+DATA "A2", "NW"
+DATA "A2", "SW"
+DATA "A4", "NE"
+DATA "B4", "SW"
+DATA "B6", "NW"
+DATA "B6", "SW"
+DATA "B8", "NE"
+DATA "C8", "SW"
+DATA "C10", "NW"
+DATA "B10", "SE"
+'DATA "B12", "NE"
+
+'Missouri River
+DATA "A6", "SW"
+DATA "A7", "E"
+DATA "A8", "NE"
+DATA "B8", "NW"
+
+'Arkansas River
+DATA "A10", "SW"
+DATA "A11", "E"
+DATA "A12", "NE"
+DATA "B12", "NW"
+
+
+'Ohio River
+DATA "C10", "NE"
+DATA "D10", "NW"
+DATA "D9", "E"
+DATA "D8", "SE"
+DATA "E8", "NW"
+DATA "E8", "NE"
+DATA "E8", "W"
+DATA "F8", "NW"
+DATA "F8", "NE"
+DATA "G8", "SW"
+DATA "G8", "SE"
+DATA "H8", "NW"
+DATA "H8", "W"
+DATA "G8", "W"
+DATA "G8", "W"
+DATA "H7", "E"
+DATA "H6", "SE"
+DATA "I6", "W"
+DATA "I6", "NW"
+DATA "I5", "E"
+DATA "I4", "SE"
+DATA "J4", "W"
+DATA "J4", "SW"
+DATA "J4", "SE"
+DATA "J4", "NW"
+DATA "J3", "E"
+
+
+'Connecticut River
+DATA "N1", "E"
+DATA "N2", "NE"
+
+'Hudson River
+DATA "M1", "E"
+DATA "M2", "NE"
+DATA "N2", "W"
+REM seems to be different odd vs even, specify westing
+DATA "N2", "SW"
+DATA "N3", "E"
+DATA "N4", "NE"
+
+
+'James River
+DATA "K8", "NE"
+DATA "L8", "NW"
+DATA "L8", "NE"
+DATA "M8", "NW"
+
+'Santee River
+DATA "K10", "W"
+DATA "K10", "SW"
+DATA "K11", "NE"
+DATA "K11", "E"
+DATA "K12", "NE"
+DATA "L12", "NW"
+DATA "L12", "NE"
+
+DATA "ZZ"
+
+CONST YM=15
+CONST XM=12
+
+TYPE MapType
+  City As Byte
+  Populous As Byte
+  Mountain as Byte 'Flag
+  Water as Byte 'Flag
+  RiverNE as Byte 'Flag
+  RiverE as Byte 'Flag
+  RiverSE as Byte 'Flag
+  RiverSW as Byte 'Flag
+  RiverW as Byte 'Flag
+  RiverNW as Byte 'Flag
+  Railway as String
+  RailwayColor as Byte
+END TYPE
+DIM Map(XM+1,YM+1) AS MapType
+DIM Border(XM, YM, XM, YM) As Byte
+DIM Score$(YM) As String
+Score$(2*YM-2)="RAILROAD SPIKE"
+
+TYPE CITYTYPE
+   Name As String
+   Abbr As String
+   X As Byte
+   Y As Byte
+   Factory As Byte
+   Depot As Byte
+   Populous As Byte
+END TYPE
+CONST CM=31
+DIM CITY(CM) AS CITYTYPE
+
+Type PlayerType
+	CityCount As Byte
+	NetworkIndex As Byte
+	Points As Byte
+	ColorPoints As Byte
+	BonusSpent As Byte
+End Type
+Dim Player(2) As PlayerType
+Dim	CityNetwork(2,CM) As Byte
+Dim CityLink(2,CM,CM) As Byte
+Dim CityRoute(2,CM) As Byte
+
+Dim CityColor(15) As Byte
+Dim DepotType(3) As Byte
+
+Dim ColorCities(P,15) As Byte
+Dim ColorName$(15) As String
+
+Const HUMAN=1
+Const PUTER=2
+Initiative = PUTER
+
+FOR Y=1 TO YM
+   FOR X=1 TO XM
+      MAP(X,Y).RiverNE = 15
+      MAP(X,Y).RiverE = 15
+      MAP(X,Y).RiverSE = 15
+      MAP(X,Y).RiverSW = 15
+      MAP(X,Y).RiverW = 15
+      MAP(X,Y).RiverNW = 15
+   NEXT Y
+NEXT X
+
+
+FOR C=1 TO CM
+   READ CITY(C).Name, CITY(C).ABBR, S$, CITY(C).Factory, City(C).Populous, City(C).Depot
+   CITY(C).Y = ASC(S$)-64
+   CITY(C).Y= 16-CITY(C).Y
+   CITY(C).X = VAL(MID$(S$,2,2))
+   City(C).Populous=0 'override for now
+   MAP(CITY(C).X,CITY(C).Y).City = C
+   MAP(CITY(C).X,CITY(C).Y).Populous = City(C).Populous
+   T=Int(Rnd(0)*6)+9
+   'Blue = 9, Green=10, Teal=11, Red=12, Pink=13, Yellow=14, 
+   City(C).Factory=T
+NEXT X
+ColorName$(9)="Blue"
+ColorName$(10)="Green"
+ColorName$(11)="Teal"
+ColorName$(12)="Red"
+ColorName$(13)="Pink"
+ColorName$(14)="Yellow"
+
+
+SUB CityCoords(City$ As String, X As Byte, Y As Byte, CityIndex As Byte)
+	DIM C As Byte
+    X=-1: Y=-1
+    CityIndex = 0
+	FOR C=1 TO CM
+		IF City$=City(C).Abbr THEN
+	    	X=City(C).X
+	    	Y=City(C).Y
+	    	CityIndex = C
+	    END IF
+	NEXT C
+END SUB
+
+Function CityLookup(CityAbbr$ As String) As Byte
+    'Print "(";CityAbbr$;")";
+	DIM C As Byte
+	DIM Found As Byte
+	Found=0
+	FOR C=1 TO CM
+		IF CityAbbr$=City(C).Abbr THEN
+	    	Found = C
+	    END IF
+	NEXT C
+	CityLookup = Found
+End Function
+
+Function AdjacentCities(X,Y) As Integer
+	Dim Cities As Byte
+	Cities=0
+	If Map(X,Y-1).City>0 Then Cities=Cities+1
+	If Map(X,Y+1).City>0 Then Cities=Cities+1
+
+	If Odd(X) And Map(X-1,Y).City>0 Then Cities=Cities+1
+	If Not Odd(X) And Map(X-1,Y-1).City>0 Then Cities=Cities+1
+
+	If Map(X+1,Y).City>0 Then Cities=Cities+1
+	If Not Odd(X) And Map(X-1,Y).City>0 Then Cities=Cities+1
+	If Odd(X) And Map(X-1,Y+1).City>0 Then Cities=Cities+1
+
+	If Not Odd(X) And Map(X+1,Y-1).City>0 Then Cities=Cities+1
+	If Odd(X) And Map(X+1,Y+1).City>0 Then Cities=Cities+1
+
+	AdjacentCities = Cities
+	
+	'Print "(";Cities;") ";
+End Function
+
+
+Function CityList$(X,Y) As String
+	Dim Cities$ As String
+	Cities$=""
+	C=Map(X,Y-1).City: If C>0 Then Cities$=Cities$+City(C).Abbr+"-"
+	C=Map(X,Y+1).City: If C>0 Then Cities$=Cities$+City(C).Abbr+"-"
+
+	C=Map(X-1,Y).City: If Odd(X) And C>0 Then Cities$=Cities$+City(C).Abbr+"-"
+	C=Map(X-1,Y-1).City: If Not Odd(X) And C>0 Then Cities$=Cities$+City(C).Abbr+"-"
+
+	C=Map(X+1,Y).City: If C>0 Then Cities$=Cities$+City(C).Abbr+"-"
+	C=Map(X-1,Y).City: If Not Odd(X) And C>0 Then Cities$=Cities$+City(C).Abbr+"-"
+	C=Map(X-1,Y+1).City: If Odd(X) And C>0 Then Cities$=Cities$+City(C).Abbr+"-"
+
+	C=Map(X+1,Y-1).City: If Not Odd(X) And C>0 Then Cities$=Cities$+City(C).Abbr+"-"
+	C=Map(X+1,Y+1).City: If Odd(X) And C>0 Then Cities$=Cities$+City(C).Abbr+"-"
+
+	CityList$ = Cities$
+End Function
+
+
+Sub ScoreColor(TargetColor As Byte)
+	Const POINTSPERCOLOR=2
+	Dim HumanCities As Byte
+	Dim PuterCities As Byte
+	Dim C As Byte
+	HumanCities=0
+	PuterCities=0
+	
+	If Score$(TargetColor-8)<>"" Then Return
+	
+	For C=1 TO CM
+		If City(C).Factory=TargetColor Then
+			If CityRoute(HUMAN,C)>0 Then
+				HumanCities = HumanCities+1
+			End if
+			If CityRoute(PUTER,C)>0 Then
+				PuterCities = PuterCities+1
+			End If
+		End If
+	Next C
+	
+	Score$(TargetColor-8) = ColorName$(TargetColor)+": "
+	If HumanCities>PuterCities Then
+		Score$(TargetColor-8) = Score$(TargetColor-8) + "Won!"
+		Player(HUMAN).ColorPoints = Player(HUMAN).ColorPoints+POINTSPERCOLOR
+	ElseIf HumanCities<PuterCities Then
+		Score$(TargetColor-8) = Score$(TargetColor-8) + "Lost..."
+		Player(PUTER).ColorPoints = Player(PUTER).ColorPoints+POINTSPERCOLOR
+	Else
+		Score$(TargetColor-8) = Score$(TargetColor-8) + "Tied."
+	End If
+	Score$(TargetColor-8) = Score$(TargetColor-8) + " " + HumanCities + " to " + PuterCities
+
+End Sub
+
+
+
+'Mountains and Water
+READ S$
+DO 
+   Y = ASC(S$)-64
+   Y = 16-Y
+   X = VAL(MID$(S$,2,2))
+   READ T$
+   IF T$="W" THEN
+      MAP(X,Y).Water = True
+   ELSEIF T$="M" THEN
+      MAP(X,Y).Mountain = True
+   END IF
+   READ S$
+LOOP UNTIL S$="ZZ" 
+
+'Rivers
+READ S$
+DO 
+   Y = ASC(S$)-64
+   Y = 16-Y
+   X = VAL(MID$(S$,2,2))
+   READ T$
+	SELECT CASE T$
+    	CASE "NE": 
+    		MAP(X,Y).RiverNE = 3
+			IF Odd(X) THEN '8,14; 12,15 works right; 3,15; 5,14; 7,14; 9, 13 works wrong
+	      		BORDER(X,Y,X-1,Y) = 2
+    	  		BORDER(X-1,Y,X,Y) = 2
+    	  	ELSE
+	      		BORDER(X,Y,X-1,Y-1) = 2
+    	  		BORDER(X-1,Y-1,X,Y) = 2
+    	  	END IF
+		CASE "E":
+      		MAP(X,Y).RiverE = 3
+      		BORDER(X,Y,X,Y-1) = 2
+      		BORDER(X,Y-1,X,Y) = 2
+		CASE "SE":
+			MAP(X,Y).RiverSE = 3
+      		BORDER(X,Y,X+1,Y-1) = 2
+      		BORDER(X+1,Y-1,X,Y) = 2
+		CASE "SW":
+			MAP(X,Y).RiverSW = 3
+      		BORDER(X,Y,X+1,Y) = 2
+      		BORDER(X+1,Y,X,Y) = 2
+		CASE "W":
+			MAP(X,Y).RiverW = 3
+      		BORDER(X,Y,X,Y+1) = 2
+      		BORDER(X,Y+1,X,Y) = 2
+		CASE "NW":
+			MAP(X,Y).RiverNW = 3
+			IF Odd(X) THEN
+	      		BORDER(X,Y,X-1,Y+1) = 2
+	      		BORDER(X-1,Y+1,X,Y) = 2
+	      	ELSE
+	      		BORDER(X,Y,X-1,Y) = 2
+	      		BORDER(X-1,Y,X,Y) = 2
+	      	END IF
+		CASE ELSE:
+			PRINT "ERROR: "; T$: END
+   END SELECT      
+   READ S$
+LOOP UNTIL S$="ZZ" 
+
+PRINT " ___";
+FOR X=2 TO XM/2
+   PRINT "     ___";
+NEXT XM
+PRINT
+
+SUB PrintHex(X,Y)
+    C=MAP(X,Y).City
+	IF C>0 THEN
+    	COLOR CITY(C).Factory
+        PRINT CITY(C).ABBR;
+        COLOR 15
+    ELSEIF MAP(X,Y).Water THEN
+        COLOR 3
+        PRINT "~~~";
+    	COLOR 15
+    ELSEIF MAP(X,Y).Mountain THEN
+    	IF MAP(X,Y).Railway="" THEN           
+            COLOR 6
+'            PRINT "^";
+''            IF Odd(X+Y) Then
+''            	Print CHR$(64+(16-Y));
+''            Else
+''            	Print Right$(Str$(X),1);
+''            End If
+			Print Chr$(64+(16-Y));X;
+            If X<10 Then Print "^";
+            COLOR 15
+        ELSE
+        	COLOR 6
+        	PRINT "^";
+        	COLOR MAP(X,Y).RailwayColor
+        	PRINT MAP(X,Y).Railway;
+			COLOR 6        	
+        	PRINT "^";
+			COLOR 51
+        END IF
+    ELSEIF Y=16 THEN
+        PRINT "   ";
+    ELSEIF MAP(X,Y).Railway="" THEN
+        COLOR 8
+        PRINT CHR$(64+(16-Y)); X; 
+        IF X<10 THEN PRINT " ";
+        'PRINT " ";AdjacentCities(X,Y);" ";
+        COLOR 15
+    ELSE
+        COLOR MAP(X,Y).RailwayColor
+        PRINT " ";MAP(X,Y).Railway;" ";
+        COLOR 15
+    END IF
+END SUB
+
+Function FitToPrint$(Message$,Width)
+    If Len(Message$)>Width Then
+    	Message$=Left$(Message$,Width-5)+".."+Right$(Message$,3)
+    End If
+    FitToPrint$ = Message$
+End Function
+
+Score$(28) = "ENTER ROUTE: E.G., BAL-L6-CMB"
+
+Map:
+
+CLS
+
+'Score Cities
+For X=6 TO 16
+	If X/2=INT(X/2) Then
+		C=X/2+6
+		If Player(Initiative).CityCount>=X Then Call ScoreColor(C)
+	End If 
+Next X
+
+FOR Y2=1 TO YM*2
+	If Y2=YM*2 THen Print
+   Y=INT(Y2/2)+1
+   'IF Y2<>YM*2 THEN
+      IF ODD(Y2) THEN
+         PRINT "/";
+      ELSE
+         PRINT "\\";
+      END IF 
+   'END IF
+   FOR X=1 TO XM
+      C=MAP(X,Y).City
+      IF NOT ODD(Y2) THEN
+         IF NOT ODD(X) THEN
+            IF Y2<>YM*2 THEN COLOR MAP(X,Y).RiverNE
+            PRINT "/";
+            COLOR 15
+            CALL PrintHex(X,Y)
+            IF Y2<>YM*2 Then COLOR MAP(X,Y).RiverSE
+            PRINT "\\";
+            COLOR 15
+         ELSE
+            IF Y2<>YM*2 THEN COLOR MAP(X,Y).RiverE
+            PRINT "_";
+			If Map(X,Y-1).City>0 Then
+				If CityRoute(HUMAN,Map(X,Y-1).City)>0 And CityRoute(PUTER,Map(X,Y-1).City)>0 Then
+					Color 5
+					Print "-";
+					Color 4
+    	        	Print "X";
+    	        	Color 15
+				ElseIf CityRoute(HUMAN,Map(X,Y-1).City)>0 Then
+					Color 5
+					Print "-";
+					Color 15
+		            PRINT "_";
+				ElseIf CityRoute(PUTER,Map(X,Y-1).City)>0 Then
+					Color 4
+    	        	Print "X";
+    	        	Color 15
+		            PRINT "_";
+				Else
+	            	Print "_";
+		            PRINT "_";
+				End If
+            ElseIf Map(X,Y-1).Populous=0 And Map(X,Y-1).Mountain=0 Then
+            	Print "_";
+            	'Print AdjacentCities(X,Y-1);
+	            PRINT "_";
+            ElseIf Map(X,Y-1).Mountain>0 Then
+                Color 6
+            	Print "^";
+            	Color MAP(X,Y).RiverE
+	            PRINT "_";
+            Else
+                COLOR City(Map(X,Y-1).City).Factory
+                Print "+";
+                COLOR MAP(X,Y).RiverE
+	            PRINT "_";
+            End If
+            COLOR 15
+         END IF   
+      ELSE
+        IF NOT ODD(X) THEN
+           COLOR MAP(X,Y).RiverNW
+           PRINT "\\";
+           COLOR 15
+           COLOR MAP(X,Y).RiverW
+            PRINT "_";
+			If Map(X,Y).City>0 Then
+				If CityRoute(HUMAN,Map(X,Y).City)>0 And CityRoute(PUTER,Map(X,Y).City)>0 Then
+					Color 5
+					Print "-";
+					Color 4
+    	        	Print "X";
+    	        	Color 15
+				ElseIf CityRoute(HUMAN,Map(X,Y).City)>0 Then
+					Color 5
+					Print "-";
+					Color 15
+		            PRINT "_";
+				ElseIf CityRoute(PUTER,Map(X,Y).City)>0 Then
+					Color 4
+    	        	Print "X";
+    	        	Color 15
+		            PRINT "_";
+				Else
+	            	Print "_";
+		            PRINT "_";
+				End If
+            ElseIf Map(X,Y).Populous=0 And Map(X,Y).Mountain=0 Then
+            	Print "_";
+            	Print "_";
+            	'Print AdjacentCities(X,Y);
+            ElseIf Map(X,Y).Populous=0 And Map(X,Y).Mountain=0 Then
+            	Print "_";
+            	Print "_";         	
+            	'Print AdjacentCities(X,Y);
+            ElseIf Map(X,Y).Mountain>0 Then
+                Color 6
+            	Print "^";
+            	Color MAP(X,Y).RiverW
+                PRINT "_"; 
+            Else
+                COLOR City(Map(X,Y).City).Factory
+                Print "+";
+                COLOR MAP(X,Y).RiverE
+	            PRINT "_";
+            End If
+           COLOR MAP(X,Y).RiverSW
+           PRINT "/";
+           COLOR 15
+        ELSE
+           CALL PrintHex(X,Y)
+        END IF  
+      END IF
+   NEXT X
+
+   'ribbon
+   IF Y2=25 THEN
+    PRINT " ";
+    If Initiative=PUTER Then
+    	Print "X: ";
+    Else
+    	Print "H: ";
+    End If
+	For X=0 To 8
+		IF X>0 THen Print "-";
+		If X=Player(HUMAN).CityCount Then
+			Color 10
+			Print "H";
+			Color 15
+		End If
+		If X=Player(PUTER).CityCount Then
+			Color 4
+			Print "X";
+			Color 15
+		End If
+		If X/2=INT(X/2) And X>=6 Then
+			C=X/2+6
+			Color C
+		End If 
+		Print X;
+		Color 15
+		IF X=4 Then
+			Color 3
+			Print "B";
+			Color 15
+		End If
+	Next X
+    Print 
+  elseIF Y2=26 THEN
+    PRINT " ";
+	For X=9 to 16
+		IF X>9 THen Print "-";
+		If X=Player(HUMAN).CityCount Or (X=16 And Player(HUMAN).CityCount>16)  Then
+			Color 10
+			Print "H";
+			Color 15
+		End If
+		If X=Player(PUTER).CityCount Or (X=16 And Player(PUTER).CityCount>16) Then
+			Color 4
+			Print "X";
+			Color 15
+		End If
+		If X/2=INT(X/2) And X>=6 Then
+			C=X/2+6
+			Color C
+		End If 
+		Print X;
+		If X=16 Then Print "+";
+		Color 15
+		IF X=4 Then
+			Color 3
+			Print "B";
+			Color 15
+		End If
+	Next X
+	PRint
+	elseif Y2=27 and command$<>"" Then
+		Print " ";FitToPrint$(Ucase$(Command$),29-9); ", "; Left$(PuterCommand$,Len(PuterCommand$)-1)
+   ELSEIF Y2<YM*2-1 THEN
+   		PRINT " "; Score$(Y2)
+ 	end if
+NEXT Y2
+
+Function Income(P) As Integer
+	Dim X as Byte
+	X = Int(Player(P).CityCount/2)
+	If X=0 Then X=1
+	Income = X
+End Function
+
+
+Budget = Income(HUMAN)
+If Income(HUMAN)>=8 Or Income(PUTER)>=8 Then 'LastBudget>=2 for testing
+	Goto Scoring
+End If
+LastBudget = Budget
+Print " $"; Budget;
+If Player(HUMAN).BonusSpent=0 And Player(PUTER).CityCount>=4 Then Print "+";
+INPUT Command$
+
+
+
+'Determine if route is passable and affordable
+C$=UCASE$(Command$)+"-"
+S$=C$
+Cost=0
+Index=0
+OX=0
+OY=0
+DO
+    Index=Index+1
+	LastCity=0
+    T$ = ""
+	DO
+		T$=T$+LEFT$(S$,1)
+   		S$=MID$(S$,2,255)
+	LOOP UNTIL LEFT$(S$,1)="-"
+	S$=MID$(S$,2,255)
+
+    Y = ASC(T$)-64
+    Y = 16-Y
+    X = VAL(MID$(T$,2,255))
+    
+    IF X>0 THEN
+        IF Index>1 THEN
+	    	Cost = Cost+1
+    		IF MAP(X,Y).Mountain THEN
+    			Cost = Cost+2
+    		ELSEIF MAP(X,Y).Water Or Map(X,Y).Railway<>"" THEN
+    		    Cost = Cost+99
+	    		S$=""
+    		END IF
+    	Else 'can't start with coordinates
+    		Cost=999
+    		S$=""
+    	END IF
+  	    'PRINT T$;"=";X;",";Y;"=";AdjacentCities(X,Y);" ";
+    ELSE
+        CALL CityCoords(T$,X,Y,C)
+        If C=0 Then Cost=Cost+999
+        LastCity=C
+	END IF
+	'Need to account for river cost
+ 	IF Index>1 THEN Cost = Cost+Border(OX,OY,X,Y)
+
+	If OX>0 AND (ABS(OX-X)>1 OR ABS(OY-Y)>1) THEN
+		'PRINT OX, X, OY, Y: INPUT OX
+   		Cost=99
+   		S$=""
+	End if
+	
+    OX=X
+    OY=Y
+	
+LOOP UNTIL LEN(S$)=0
+
+
+IF (LEN(Command$)<10 AND Cost<999) OR LastCity=0 Then
+	Score$(28)=Left$(C$,Len(C$)-1)+": MISSING DEST."
+	Goto MAP
+ElseIF Cost>Budget Or LEN(Command$)<10 THEN
+   	'One-time bonus available, but not on first turn
+   	If Cost<=Budget+3 And Player(HUMAN).BonusSpent=0 And Player(PUTER).CityCount>=4 Then
+  		Score$(28)=FitToPrint$(LEFT$(C$,LEN(C$)-1),29-13)+": $"+COST+" W/BONUS"
+  		Print Score$(28)
+  	    Player(HUMAN).BonusSpent=1
+	Else
+	   	C$=LEFT$(C$,LEN(C$)-1)
+		IF Cost<99 THEN
+			Score$(28)=FitToPrint$(C$,29-15)+": $"+COST+" TOO MUCH!"
+	    ElseIf Cost<999 Then
+	    	Score$(28)=FitToPrint$(C$,29-13)+": IMPASSABLE!"
+		Else
+			Score$(28)=FitToPrint$(C$,29-7)+": WHAT?"
+		End If
+	    GOTO MAP
+    END IF
+END IF
+If Cost<=Budget Then Score$(28)=""
+
+S$=C$
+Index=0
+OriginCity=0
+OX=0
+OY=0
+DO
+    Index=Index+1
+    T$ = ""
+	DO
+		T$=T$+LEFT$(S$,1)
+   		S$=MID$(S$,2,255)
+	LOOP UNTIL LEFT$(S$,1)="-"
+	S$=MID$(S$,2,255)
+
+    Y = ASC(T$)-64
+    Y = 16-Y
+    X = VAL(MID$(T$,2,255))
+  
+    IF X=0 THEN
+        If OriginCity=0 Then
+	    	Call CityCoords(T$,X,Y,OriginCity)
+    	Else
+	    	Call CityCoords(T$,X,Y,DestinationCity)
+		End If    	
+    END IF
+
+    IF Index>1 THEN
+    	IF Y=OY Then
+			MAP(X,Y).Railway = "_"
+		ELSEIF X=OX Then
+			MAP(X,Y).Railway = "|"
+		ELSEIF X>OX Then
+			MAP(X,Y).Railway = "\\"
+		ELSE
+			MAP(X,Y).Railway = "/"
+		END IF
+		MAP(X,Y).RailwayColor = 5 'purple; computer=4, red
+	END IF
+	OX=X
+	OY=Y
+	
+LOOP UNTIL LEN(S$)=0
+
+
+SUB LinkCities(P As Byte, OriginCity as Byte, DestinationCity As Byte)
+
+	If CityLink(P,OriginCity,DestinationCity)=0 Then
+		CityRoute(P,OriginCity) = CityRoute(P,OriginCity)+1
+		CityRoute(P,DestinationCity) = CityRoute(P,DestinationCity)+1
+	End If
+	
+	'If neither city is in a network
+	If CityNetwork(P,OriginCity)=0 And CityNetwork(P,DestinationCity)=0 Then
+		Player(P).NetworkIndex = Player(P).NetworkIndex+1
+	    'PRINT "New network #"; Player(P).NetworkIndex; " ";
+		CityNetwork(P,OriginCity) = Player(P).NetworkIndex
+		CityNetwork(P,DestinationCity) = Player(P).NetworkIndex
+		CityLink(P,OriginCity,DestinationCity) = Player(P).NetworkIndex
+		Player(P).CityCount = Player(P).CityCount+2
+	ElseIf CityNetwork(P,DestinationCity)=0 Then
+		CityNetwork(P,DestinationCity) = CityNetwork(P,OriginCity)
+		CityLink(P,OriginCity,DestinationCity) = CityNetwork(P,OriginCity)
+		Player(P).CityCount = Player(P).CityCount+1
+	ElseIf CityNetwork(P,OriginCity)=0 Then
+		CityNetwork(P,OriginCity) = CityNetwork(P,DestinationCity)
+		CityLink(P,OriginCity,DestinationCity) = CityNetwork(P,DestinationCity)
+		Player(P).CityCount = Player(P).CityCount+1
+	ElseIf CityNetwork(P,OriginCity)=CityNetwork(P,DestinationCity) THEN
+		CityLink(P,OriginCity,DestinationCity) = CityNetwork(P,OriginCity)
+	Else 'Cities in different networks
+		'Keep the lower network number
+		If CityNetwork(P,OriginCity)<CityNetwork(P,DestinationCity) Then
+			UpdatedNetwork = CityNetwork(P,OriginCity)
+			RetiredNetwork = CityNetwork(P,DestinationCity) 
+		Else
+			UpdatedNetwork = CityNetwork(P,DestinationCity)
+			RetiredNetwork = CityNetwork(P,OriginCity) 
+		End If
+		For C=1 To CM
+			If CityNetwork(P,C) = RetiredNetwork Then
+				CityNetwork(P,C) = UpdatedNetwork
+			End If
+		Next X
+		CityLink(P,OriginCity,DestinationCity) = UpdatedNetwork
+		If P=HUMAN Then
+			Initiative=PUTER
+		Else
+			Initiative=HUMAN
+		End If
+	End If
+
+	CityLink(P,DestinationCity,OriginCity) = CityLink(P,OriginCity,DestinationCity)
+
+End SUB
+
+
+Call LinkCities(HUMAN,OriginCity,DestinationCity)
+
+'Computer's move
+'AI
+
+
+If Income(PUTER)>4 Then
+	'Pick a random city
+	OriginCity=INT(RND(0)*CM)+1
+	X=City(OriginCity).X
+	Y=City(OriginCity).Y
+	If X<XM-3 And Y>1 Then
+		'If two hexes below is next to a city
+		If AdjacentCities(X+3,Y)>0 Then
+			'If first hex is empty and second hex is empty
+			If Map(X+1,Y).Railway="" And Map(X+2,Y).Railway="" And Map(X+3,Y).Railway="" Then
+				DestinationCity = CityLookup(Left$(CityList$(X+3,Y),3))
+				'If not a pair of cities already then
+				If CityLink(PUTER,OriginCity,DestinationCity)=0 Then
+					Map(X+1,Y).Railway = "X"
+					MAP(X+1,Y).RailwayColor = 4
+					Map(X+2,Y).Railway = "X"
+					MAP(X+2,Y).RailwayColor = 4
+					Map(X+3,Y).Railway = "X"
+					MAP(X+3,Y).RailwayColor = 4
+					Call LinkCities(PUTER,OriginCity,DestinationCity)
+					PuterCommand$ = City(OriginCity).Abbr + "-" + City(DestinationCity).Abbr + "-"
+					Goto Map
+				End If
+			End If
+		End If
+	End If
+End If
+
+If Income(PUTER)>4 Then
+	'Pick a random city
+	OriginCity=INT(RND(0)*CM)+1
+	X=City(OriginCity).X
+	Y=City(OriginCity).Y
+	If Y<YM-3 Then
+		'If three hexes below is next to a city
+		If AdjacentCities(X,Y+3)>0 Then
+			'If first hex is empty and second hex is empty
+			If Map(X,Y+1).Railway="" And Map(X,Y+2).Railway="" And Map(X,Y+3).Railway="" And Map(X,Y+1).Water+Map(X,Y+2).Water+Map(X,Y+3).Water=0 Then
+				DestinationCity = CityLookup(Left$(CityList$(X,Y+3),3))
+				'If not a pair of cities already then
+				If CityLink(PUTER,OriginCity,DestinationCity)=0 Then
+					Map(X,Y+1).Railway = "X"
+					MAP(X,Y+1).RailwayColor = 4
+					Map(X,Y+2).Railway = "X"
+					MAP(X,Y+2).RailwayColor = 4
+					Map(X,Y+3).Railway = "X"
+					MAP(X,Y+3).RailwayColor = 4
+					Call LinkCities(PUTER,OriginCity,DestinationCity)
+					PuterCommand$ = City(OriginCity).Abbr + "-" + City(DestinationCity).Abbr + "-"
+					Goto Map
+				End If
+			End If
+		End If
+	End If
+End If
+
+
+If Income(PUTER)=0 Or Income(PUTER)>2 Then
+	'Pick a random city
+	OriginCity=INT(RND(0)*CM)+1
+	X=City(OriginCity).X
+	Y=City(OriginCity).Y
+	If Y<YM-2 Then
+		'If two hexes below is next to a city
+		If AdjacentCities(X,Y+2)>0 Then
+			'If first hex is empty and second hex is empty
+			If Map(X,Y+1).Railway="" And Map(X,Y+2).Railway="" And Map(X,Y+1).Water+Map(X,Y+2).Water=0 Then
+				DestinationCity = CityLookup(Left$(CityList$(X,Y+2),3))
+				'If not a pair of cities already then
+				If CityLink(PUTER,OriginCity,DestinationCity)=0 Then
+					Map(X,Y+1).Railway = "X"
+					MAP(X,Y+1).RailwayColor = 4
+					Map(X,Y+2).Railway = "X"
+					MAP(X,Y+2).RailwayColor = 4
+					Call LinkCities(PUTER,OriginCity,DestinationCity)
+					PuterCommand$ = City(OriginCity).Abbr + "-" + City(DestinationCity).Abbr + "-"
+					Goto Map
+				End If
+			End If
+		End If
+	End If
+End If
+
+If Income(PUTER)=0 Or Income(PUTER)>2 Then
+	'Pick a random city
+	OriginCity=INT(RND(0)*CM)+1
+	X=City(OriginCity).X
+	Y=City(OriginCity).Y
+	If X<XM-2 Then
+		'If two hexes below is next to a city
+		If AdjacentCities(X+2,Y)>0 Then
+			'If first hex is empty and second hex is empty
+			If Map(X+1,Y).Railway="" And Map(X+2,Y).Railway="" Then
+				DestinationCity = CityLookup(Left$(CityList$(X+2,Y),3))
+				'If not a pair of cities already then
+				If CityLink(PUTER,OriginCity,DestinationCity)=0 Then
+					Map(X+1,Y).Railway = "X"
+					MAP(X+1,Y).RailwayColor = 4
+					Map(X+2,Y).Railway = "X"
+					MAP(X+2,Y).RailwayColor = 4
+					Call LinkCities(PUTER,OriginCity,DestinationCity)
+					PuterCommand$ = City(OriginCity).Abbr + "-" + City(DestinationCity).Abbr + "-"
+					Goto Map
+				End If
+			End If
+		End If
+	End If
+End If
+
+
+DO
+	DO
+		DO
+			X=INT(RND(0)*XM+1)
+			Y=INT(RND(0)*YM+1)
+		LOOP UNTIL MAP(X,Y).Railway = "" AND MAP(X,Y).Water = 0 AND MAP(X,Y).City = 0 AND AdjacentCities(X,Y)>1
+		PuterCommand$ = CityList$(X,Y)
+		OriginCity = CityLookup(Left$(PuterCommand$,3))
+		DestinationCity = CityLookup(Mid$(PuterCommand$,5,3))
+	LOOP UNTIL CityLink(PUTER,OriginCity,DestinationCity)=0
+LOOP UNTIL Player(PUTER).CityCount<14 OR CityRoute(PUTER,OriginCity)>0 Or CityRoute(P,DestinationCity)>0
+Call LinkCities(PUTER,OriginCity,DestinationCity)
+
+'LOOP UNTIL MAP(X,Y).Railway = "" AND MAP(X,Y).City = 0 AND MAP(X,Y).Water = 0
+MAP(X,Y).Railway = "X"
+MAP(X,Y).RailwayColor = 4
+
+Goto Map
+
+FOR Z=1 TO Budget-1
+    X=X-1: IF X<0 THEN X=1
+    IF MAP(X,Y).Railway<>"" OR MAP(X,Y).City<>0 OR MAP(X,Y).Water Then
+    	Y=Y-1: IF Y<0 THEN Y=1
+	    IF MAP(X,Y).Railway<>"" OR MAP(X,Y).City<>0 OR MAP(X,Y).Water Then
+			X=X+2: IF X>XM THEN X=XM
+		    IF MAP(X,Y).Railway<>"" OR MAP(X,Y).City<>0 OR MAP(X,Y).Water Then
+		    	Y=Y+2: IF Y>YM THEN Y=YM
+		    END IF
+		END IF
+	END IF
+	MAP(X,Y).Railway = "|"
+	MAP(X,Y).RailwayColor = 4
+NEXT Z
+
+'Repeat
+	'Pick a random city
+	'C=INT(RND(0)*CM+1)
+	
+	'Pick a random direction
+'Until that cell is empty
+'While new city not adjacent
+	'Continue random direction
+
+GOTO Map
+
+
+
+
+Scoring:
+
+If Score$(8)<>"" Then End
+
+
+'Score any remaining colors that were unscored
+FOR X=9 TO 14
+	Call ScoreColor(X)
+Next X
+
+ScoreIndex=8
+
+'Cities - You get points for each city you’re in if you have more routes than anyone else: points equal the number of routes from it if alone otherwise the number of your competitor’s routes
+
+S$=""
+T$=""
+For C=1 TO CM
+	If CityRoute(HUMAN,C)>CityRoute(PUTER,C) Then
+		If CityRoute(PUTER,C)=0 Then
+			X=CityRoute(HUMAN,C)
+		Else
+			X=CityRoute(PUTER,C)
+		End If
+		Player(HUMAN).Points = Player(HUMAN).Points+X
+		S$=S$+City(C).Abbr
+		IF X>1 Then S$=S$+X
+		S$=S$+","
+	ElseIf CityRoute(PUTER,C)>0 Then
+		If CityRoute(HUMAN,C)=0 Then
+			X=CityRoute(PUTER,C)
+		Else
+			X=CityRoute(HUMAN,C)
+		End If
+		Player(PUTER).Points = Player(PUTER).Points+X
+		T$=T$+City(C).Abbr
+		IF X>1 Then T$=T$+X
+		T$=T$+","
+	End If
+Next C
+Score$(8) = "Human Cities: "+Player(HUMAN).Points+" pts."
+Score$(9) = "Computer Cities: "+Player(PUTER).Points+" pts."
+ScoreIndex=17
+
+Sub OutputSeries(Series$)
+	Dim Buffer$ As String
+	Dim Ln$ As String
+	Buffer$=Series$
+	Do
+		Ln$ = Left$(Buffer$,28)
+		Buffer$=Mid$(Buffer$,29,255)
+		While Right$(","+Ln$,1)<>","
+			Buffer$=Right$(Ln$,1)+Buffer$
+			Ln$=Left$(Ln$,Len(Ln$)-1)
+		Wend
+		'Remove trailing comma
+		If Buffer$="" Then Ln$=Left$(Ln$,Len(Ln$)-1)
+		'Set next line
+		Score$(ScoreIndex)=Ln$
+		ScoreIndex=ScoreIndex+1
+	Loop Until Buffer$="" Or ScoreIndex>32
+End Sub
+
+Call OutputSeries("Human: "+S$)
+ScoreIndex=ScoreIndex+1
+Call OutputSeries("Computer: "+T$)
+
+
+'Smallest Network - You get one point per dollar collected from your smallest network 
+SmallestNetwork=CM
+S$=""
+FOR N=1 TO Player(HUMAN).NetworkIndex
+	NetworkSize=0
+    FOR C=1 TO CM
+   		IF CityNetwork(HUMAN,C)=N Then
+   		 	NetworkSize=NetworkSize+1
+   		End If	
+   	NEXT C
+	If NetworkSize>0 Then
+		S$=S$+",#"+N+"="+NetworkSize
+		If NetworkSize<SmallestNetwork Then SmallestNetwork = NetworkSize
+	End If	
+NEXT N
+Score$(11) = Mid$(S$,2,255)
+If Len(Score$(11))<19 Then
+	Score$(11)="Networks: "+Score$(11)
+ElseIf Len(Score$(11))>28 then
+	Score$(11)=Left$(Score$(11),28)
+End If
+
+'Largest Network - Computer gets points per city in its largest network 
+LargestNetwork=0
+FOR N=1 TO Player(PUTER).NetworkIndex
+	NetworkSize=0
+    FOR C=1 TO CM
+   		IF CityNetwork(PUTER,C)=N Then
+   		 	NetworkSize=NetworkSize+1
+   		End If	
+   	NEXT C
+	If NetworkSize>LargestNetwork Then
+		LargestNetwork=NetworkSize
+	End If	
+NEXT N
+
+
+Score$(12) = "Human "+INT(SmallestNetwork/2)+ " vs. Computer "+INT(LargestNetwork/2)
+Player(HUMAN).Points=Player(HUMAN).Points+INT(SmallestNetwork/2)+Player(HUMAN).ColorPoints
+Player(PUTER).Points=Player(PUTER).Points+INT(LargestNetwork/2)+Player(PUTER).ColorPoints
+If Player(HUMAN).Points>Player(PUTER).Points Or (Initiative=PUTER And Player(HUMAN).Points=Player(PUTER).Points) Then
+	Score$(14) = "Victory! "
+Else
+	Score$(14) = "Defeat.... "
+End If
+Score$(15) = Player(HUMAN).Points+" vs. "+Player(PUTER).Points
+
+
+Print
+Goto MAP
+
+
+
+FUNCTION Cost(Origin as String, Destination as String)
+   X=1
+   'If mountain, add $2
+   'If crossing a river between these two, add $2
+
+END FUNCTION
+
+
+
+    </script>
+  </head>
+</html>
+
+
+
+
+
+
+
