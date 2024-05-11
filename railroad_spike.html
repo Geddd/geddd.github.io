@@ -2,7 +2,7 @@
 <!DOCTYPE html>
 <html>
   <head>
-   <title>Railroad Spike in BASIC Anywhere Machine</title>
+<title>Railroad Spike in BASIC Anywhere Machine</title>
       <script>
 // Copyright 2022 CJ Veniot
 // Derivative of wwwbasic.js (https://github.com/google/wwwbasic/blob/master/wwwbasic.js)
@@ -4916,6 +4916,36 @@ return (e - d.setHours(0,0,0,0))/1000;
 '';
 })();
 
+function focus() {
+    $('input').focus();
+}
+$(focus);
+$(function() {
+    $(document.body).load(focus);
+    $('#click').click(focus);
+    $('#click-timeout').click(function() {
+        setTimeout(focus);
+    });
+    $('#mousedown').mousedown(focus);
+    $('#mousedown-timeout').mousedown(function() {
+        setTimeout(focus);
+    });
+    $('#mouseup').mouseup(focus);
+    $('#mouseup-timeout').mouseup(function() {
+        setTimeout(focus);
+    });
+    $('#extern-click-trigger').click(function() {
+        $('#click').click();
+    });
+    $('#tap').bind('tapone', function() {
+        focus();
+    });
+    $('#tap-triggering-click').bind('tapone', function() {
+        $('#click').click();
+    });
+    
+});
+
 </script>
     <script type="text/basic">
 	 	screen 0 : print "mouse click here to set mouse and keyboard focus"
@@ -5629,7 +5659,9 @@ FOR Y2=1 TO YM*2
 	Next X
 	PRint
 	elseif Y2=27 and command$<>"" Then
-		Print " ";FitToPrint$(Ucase$(Command$),29-9); ", "; Left$(PuterCommand$,Len(PuterCommand$)-1)
+		Print " ";FitToPrint$(Ucase$(Command$),29-9); ", "; 
+		if PuterCommands$>7 Then Print "!!!";
+		Print Left$(PuterCommand$,Len(PuterCommand$)-1)
    ELSEIF Y2<YM*2-1 THEN
    		PRINT " "; Score$(Y2)
  	end if
