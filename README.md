@@ -1,3 +1,3 @@
 # troypress.github.io
-- [Eighty Days: A BASIC Travel Game](https://github.com/Geddd/troypress.github.io/blob/main/80_Days.html)
-- [Railroad Spike: A BASIC Rail Game](https://github.com/Geddd/troypress.github.io/blob/main/railroad_spike.html)
+- [Eighty Days: A BASIC Travel Game](https://geddd.github.io/80_Days.html)
+- [Railroad Spike: A BASIC Rail Game](https://geddd.github.io/railroad_spike.html)
