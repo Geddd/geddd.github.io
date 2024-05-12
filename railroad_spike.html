@@ -4916,36 +4916,6 @@ return (e - d.setHours(0,0,0,0))/1000;
 '';
 })();
 
-function focus() {
-    $('input').focus();
-}
-$(focus);
-$(function() {
-    $(document.body).load(focus);
-    $('#click').click(focus);
-    $('#click-timeout').click(function() {
-        setTimeout(focus);
-    });
-    $('#mousedown').mousedown(focus);
-    $('#mousedown-timeout').mousedown(function() {
-        setTimeout(focus);
-    });
-    $('#mouseup').mouseup(focus);
-    $('#mouseup-timeout').mouseup(function() {
-        setTimeout(focus);
-    });
-    $('#extern-click-trigger').click(function() {
-        $('#click').click();
-    });
-    $('#tap').bind('tapone', function() {
-        focus();
-    });
-    $('#tap-triggering-click').bind('tapone', function() {
-        $('#click').click();
-    });
-    
-});
-
 </script>
     <script type="text/basic">
 	 	screen 0 : print "mouse click here to set mouse and keyboard focus"
@@ -6043,24 +6013,26 @@ T$=""
 For C=1 TO CM
 	If CityRoute(HUMAN,C)>CityRoute(PUTER,C) Then
 		If CityRoute(PUTER,C)=0 Then
-			X=CityRoute(HUMAN,C)
-		Else
-			X=CityRoute(PUTER,C)
+			X=1
+			'X=CityRoute(HUMAN,C)
+			Player(HUMAN).Points = Player(HUMAN).Points+X
+			S$=S$+City(C).Abbr
+			IF X>1 Then S$=S$+X
+			S$=S$+","
+		'Else
+			'X=CityRoute(PUTER,C)
 		End If
-		Player(HUMAN).Points = Player(HUMAN).Points+X
-		S$=S$+City(C).Abbr
-		IF X>1 Then S$=S$+X
-		S$=S$+","
 	ElseIf CityRoute(PUTER,C)>0 Then
 		If CityRoute(HUMAN,C)=0 Then
-			X=CityRoute(PUTER,C)
-		Else
-			X=CityRoute(HUMAN,C)
+			X=1
+			'X=CityRoute(PUTER,C)
+			Player(PUTER).Points = Player(PUTER).Points+X
+			T$=T$+City(C).Abbr
+			IF X>1 Then T$=T$+X
+			T$=T$+","
+		'Else
+			'X=CityRoute(HUMAN,C)
 		End If
-		Player(PUTER).Points = Player(PUTER).Points+X
-		T$=T$+City(C).Abbr
-		IF X>1 Then T$=T$+X
-		T$=T$+","
 	End If
 Next C
 Score$(8) = "Human Cities: "+Player(HUMAN).Points+" pts."
